@@ -1,0 +1,34 @@
+Michael Romero, 996799661
+Allan Soria, 
+We referenced StackOverflow and google a LOT, especially for System Calls and library information.
+
+Of course, most of the TERMIOS library usage is from Professor Nitta's code.
+
+Below are the critical sections. Our documentation was poor, rewriting and poorly documenting our files, I'm sure some references have been lost, but such references would be generalized, standard methods of doing things. If there are any questions, we can thoroughly explain everything except the loop_pipe section below. 
+
+References:
+MOST CRITICAL REFERENCE:
+void loop_pipe()
+  http://stackoverflow.com/questions/17630247/coding-multiple-pipe-in-c
+
+  Our loop_pipe function, which forks the children, started as a skeleton based on this example. We had a lot of difficulty understand FD structure and linking them together. We both understand our loop_pipe now, except for one part: 
+
+  line: 278
+  fd_in = p[READ_END]
+
+  If the child is writing its output to p[WRITE_END], then runs an exec which prints to it's WRITE_END, why does the next child replace STD_IN with fd_in.
+
+   
+
+LESS CRITICAL REFERENCES:
+line 373: void pwd()
+  Immediately get the current working directory, this code is pulled from http    ://stackoverflow.com/questions/143174/how-do-i-get-the-directory-that-a-program-i    s-running-from on 3/29/2016 by original user computinglife and edited by Polar
+  Also, for example, we used #define GetCurrentDir as getcwd. It made it easier to read.
+
+line 383: void ls(string directory)
+  http://stackoverflow.com/questions/20775762/how-to-walk-through-a-directory-in-c-and-print-all-files-name-and-permissions?lq=1
+
+  Our LS is significantly different, however, this was definitely the starting source.
+
+
+  
