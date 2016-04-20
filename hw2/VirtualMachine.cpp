@@ -2,14 +2,17 @@
 #include "Machine.h"
 #include <iostream>
 #include <queue>
+#include <vector>
 using namespace std;
+extern "C" {
 
 volatile int TIMER;
-static const int HIGH 3
-static const int MED 2
-static const int LOW 1
+static const int HIGH = 3;
+static const int MED = 2;
+static const int LOW = 1;
 
 class TCB{
+  public:
 	TVMThreadID id;
 	TVMThreadPriority priority;
 	TVMThreadState state;
@@ -22,14 +25,13 @@ class TCB{
 //PRIORITY QUEUE SETUP
 //WILL RETURN HIGH PRIORITY > MED PRIORITY > LOW PRIORITY
 struct LessThanByPriority{
-  bool operator()(const TCB& lhs, const TCH& rhs) const{
+  bool operator()(const TCB& lhs, const TCB& rhs) const{
     return lhs.priority < rhs.priority;
   }
-}
+};
 typedef priority_queue<TCB, vector<TCB>, LessThanByPriority> pq;
 // END PRIORITY QUEUE SETUP
 
-extern "C" {
 
 
 TVMMainEntry VMLoadModule(const char *module);
@@ -52,6 +54,7 @@ TVMStatus VMStart(int tickms, int argc, char *argv[]){
 		return VM_STATUS_FAILURE;
 	}
 	cout << "TIMER:" << TIMER << endl;
+  cout << "tickms: " << tickms << endl;
 	TMachineAlarmCallback callback = callbackAlarm;
 	MachineRequestAlarm(tickms*1000,callback,&flag);
 	mainEntry(argc,argv);
