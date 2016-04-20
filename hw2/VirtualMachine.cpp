@@ -5,26 +5,29 @@
 using namespace std;
 
 volatile int TIMER;
+static const int HIGH 3
+static const int MED 2
+static const int LOW 1
 
 class TCB{
-	//state
-	TVMStatus status;
-	
-	TVMTick vmTick;
-	//file
-
-	//MM
-	TVMMemorySize mmSize;
-
 	TVMThreadID id;
-	
-	TVMThreadState state;
-
 	TVMThreadPriority priority;
+	TVMThreadState state;
+	TVMMemorySize mmSize;
+	TVMStatus status;
+	TVMTick vmTick;
 	
 };
 
-queue<TCB> threadBlks;
+//PRIORITY QUEUE SETUP
+//WILL RETURN HIGH PRIORITY > MED PRIORITY > LOW PRIORITY
+struct LessThanByPriority{
+  bool operator()(const TCB& lhs, const TCH& rhs) const{
+    return lhs.priority < rhs.priority;
+  }
+}
+typedef priority_queue<TCB, vector<TCB>, LessThanByPriority> pq;
+// END PRIORITY QUEUE SETUP
 
 extern "C" {
 
@@ -34,7 +37,7 @@ TVMStatus VMFilePrint(int filedescriptor, const char *format, ...);
 
 void  callbackAlarm( void* t){
 	
-	TIMER = 0;
+	TIMER--;
     
 }
 
@@ -43,7 +46,7 @@ TVMStatus VMStart(int tickms, int argc, char *argv[]){
 	// request time
 	// int time = 0;
 	int flag;
-	TIMER = 50;
+	TIMER = 100;
 	TVMMainEntry mainEntry =  VMLoadModule(argv[0]);
 	if(mainEntry == NULL){
 		return VM_STATUS_FAILURE;
