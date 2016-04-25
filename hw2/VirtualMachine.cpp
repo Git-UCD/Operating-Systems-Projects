@@ -26,6 +26,7 @@ class TCB{
 	TVMTick vmTick;
 	TVMThreadEntry entryCB;
 	void* param;
+	SMachineContext context;
 	
 };
 //Contains all thread create to lookup
@@ -44,6 +45,12 @@ struct LessThanByPriority{
 typedef priority_queue<TCB, vector<TCB>, LessThanByPriority> pq;
 // END PRIORITY QUEUE SETUP
 
+pq priorThreads;
+pq sleepThreads;
+
+void threadSchedule(){
+
+}
 
 
 TVMMainEntry VMLoadModule(const char *module);
@@ -72,6 +79,7 @@ TVMStatus VMStart(int tickms, int argc, char *argv[]){
 	if(mainEntry == NULL){
 		return VM_STATUS_FAILURE;
 	}
+
 	// cout << "TIMER:" << TIMER << endl;
 	int flag = false;
 
@@ -81,6 +89,11 @@ TVMStatus VMStart(int tickms, int argc, char *argv[]){
         TCB startB;
         startB.priority = VM_THREAD_PRIORITY_NORMAL;
         startB.state = VM_THREAD_STATE_WAITING;
+
+        // SMachineContextRef startContext = new SMachineContext;
+        // MachineContextSwitch(NULL,startContext);
+        // startB.context = *startContext;
+
         
         TCB idleB;
         idleB.entryCB = idleThread;
@@ -89,6 +102,8 @@ TVMStatus VMStart(int tickms, int argc, char *argv[]){
         idleB.mmSize = 0x10000;
         threadList.push_back(startB);
         threadList.push_back(idleB);
+
+
 
         mainEntry(argc,argv);
         MachineTerminate();
@@ -131,6 +146,7 @@ TVMStatus VMThreadCreate(TVMThreadEntry entry, void *param, TVMMemorySize memsiz
 	threadB.param = param;
 	threadB.state = VM_THREAD_STATE_DEAD;
 	threadList.push_back(threadB);
+	priorThreads.push(threadB);
 	
 return VM_STATUS_SUCCESS; 
 }
@@ -156,9 +172,10 @@ TVMStatus VMThreadActivate(TVMThreadID thread){
         		return VM_STATUS_ERROR_INVALID_STATE;
         	}
         	// activate thread
-        	SMachineContext mtContext;
+        	SMachineContextRef  mtContext  = new SMachineContext;
         	void* stackaddr = (void*)malloc(threadList[i].mmSize);
-        	MachineContextCreate( &mtContext, threadWrapper , &threadList[i], stackaddr, threadList[i].mmSize);
+        	MachineContextCreate( mtContext, threadWrapper , &threadList[i], stackaddr, threadList[i].mmSize);\
+        	threadList[i].context = *mtContext;
         	
 
 
@@ -242,18 +259,19 @@ TVMStatus VMThreadSleep(TVMTick tick){
 
 
 
-bool writeDone = false;
+volatile bool writeDone = false;
 void fileWCallback(void* a,int result){
+
 	writeDone = true;
 }
 
 TVMStatus VMFileWrite(int filedescriptor, void *data, int *length){
     // write(filedescriptor,data,*length);
     TMachineFileCallback myfilecallback = fileWCallback;
-    int calldata = NULL;
-    MachineFileWrite(filedescriptor, data, *length, myfilecallback, &calldata);
+   
+    MachineFileWrite(filedescriptor, data, *length, myfilecallback, NULL);
     // cout << "write: " << calldata << endl;
-  //   while(!writeDone);
+    while(!writeDone);
 
     // }
 
@@ -261,17 +279,21 @@ TVMStatus VMFileWrite(int filedescriptor, void *data, int *length){
     return VM_STATUS_SUCCESS;
 }
 volatile bool openDone = false; 
+int fd;
 void fileOpenCallback(void* calldata, int result){
-    result = 9;
+    cout << "CB:" << result << endl;
+    fd = result;
+   
     openDone = true;
 }
  
 TVMStatus VMFileOpen(const char *filename, int flags, int mode, int *filedescriptor){
 	TMachineFileCallback fOpenCallback = fileOpenCallback;
-	int callData;
-	MachineFileOpen(filename, flags,  mode, fOpenCallback, &callData );
+
+	MachineFileOpen(filename, flags,  mode, fOpenCallback, NULL);
 	while(!openDone);
-	*filedescriptor = callData;
+	*filedescriptor = fd;
+	cout << "fileopen:" <<  fd << endl;
 
 
  return VM_STATUS_SUCCESS;
@@ -283,38 +305,47 @@ void fileCloseCallback(void* calldata,int result){
 }
 TVMStatus VMFileClose(int filedescriptor){
 	TMachineFileCallback fCloseCallback = fileCloseCallback;
-	int results = 0;
-	MachineFileClose(filedescriptor, fCloseCallback, &results);
+	
+	MachineFileClose(filedescriptor, fCloseCallback, NULL);
 	while(!closeDone);
 	return VM_STATUS_SUCCESS;
 }  
 
 volatile bool seekdone = false;
+int offset;
 void fileSeekCallback(void* calldata,int result){
+	cout << "seek:" << result << endl;
+	offset = result;
 	seekdone = true;
 }
 
 TVMStatus VMFileSeek(int filedescriptor, int offset, int whence, int *newoffset){
 	TMachineFileCallback fSeekCallback = fileSeekCallback;
-	int results;
-	MachineFileSeek( filedescriptor, offset, whence, fSeekCallback, &results);
+	
+	MachineFileSeek( filedescriptor, offset, whence, fSeekCallback, NULL);
 	while(!seekdone);
-	*newoffset = results;
+	*newoffset = offset;
 
 
     return VM_STATUS_SUCCESS;
 }
 volatile bool readDone = false;
+int readsize; 
 void fileReadCallback(void* calldata,int result){
+	
+	readsize = result;
 	readDone = true;
 }
 
 
 TVMStatus VMFileRead(int filedescriptor, void *data, int *length){
 	TMachineFileCallback fReadCallback = fileReadCallback;
-	int results;
-	MachineFileRead(filedescriptor, data, *length, fReadCallback, &results);
+	
+	MachineFileRead(filedescriptor, data, *length, fReadCallback, NULL);
 	while(!readDone);
+	*length = readsize;
+
+
 	return VM_STATUS_SUCCESS;
 }
 
