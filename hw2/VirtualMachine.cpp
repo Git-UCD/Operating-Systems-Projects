@@ -10,16 +10,18 @@ volatile int TIMER;
 static const int HIGH = 3;
 static const int MED = 2;
 static const int LOW = 1;
+TMachineSignalStateRef sigstate;
 
 class TCB{
   public:
 	TVMThreadID id;
+  TVMThreadIDRef idref;
 	TVMThreadPriority priority;
 	TVMThreadState state;
 	TVMMemorySize mmSize;
 	TVMStatus status;
 	TVMTick vmTick;
-	
+  	
 };
 
 //PRIORITY QUEUE SETUP
@@ -53,20 +55,17 @@ TVMStatus VMStart(int tickms, int argc, char *argv[]){
 	if(mainEntry == NULL){
 		return VM_STATUS_FAILURE;
 	}
-	cout << "TIMER:" << TIMER << endl;
-  cout << "tickms: " << tickms << endl;
 	TMachineAlarmCallback callback = callbackAlarm;
 	MachineRequestAlarm(tickms*1000,callback,&flag);
 	mainEntry(argc,argv);
-	cout << "TIMER:" << TIMER << endl;
 
-	cout << "flag:" << flag << endl;
-
-	TCB tstartBlk;
-
-
-
-
+	TCB* tstartBlk = new TCB;
+  tstartBlk->id = 0;
+  tstartBlk->idref = 0;
+  tstartBlk->priority = VM_THREAD_PRIORITY_NORMAL;
+  tstartBlk->state = VM_THREAD_STATE_RUNNING;
+  tstartBlk->mmSize = 0;
+  tstartBlk->vmTick = 0;
 	
 	MachineTerminate();
 	return VM_STATUS_SUCCESS; 
@@ -82,7 +81,12 @@ return VM_STATUS_SUCCESS;
 }
 
 TVMStatus VMThreadCreate(TVMThreadEntry entry, void *param, TVMMemorySize memsize, TVMThreadPriority prio, TVMThreadIDRef tid){
-	TCB threadB;
+  MachineSuspendSignals(sigstate);
+  TCB* tcb = new TCB;
+  tcb->
+  
+  MachineResumeSignals(sigstate);
+  
 return VM_STATUS_SUCCESS; 
 }
 
