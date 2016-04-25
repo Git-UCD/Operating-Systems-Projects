@@ -42,14 +42,14 @@ TVMThreadID curThreadID; // current operating thread
 //PRIORITY QUEUE SETUP
 //WILL RETURN HIGH PRIORITY > MED PRIORITY > LOW PRIORITY
 struct LessThanByPriority{
-  bool operator()(const TCB& lhs, const TCB& rhs) const{
-    return lhs.priority < rhs.priority;
+  bool operator()(const TCB* lhs, const TCB* rhs) const{
+    return lhs->priority < rhs->priority;
   }
 };
-typedef priority_queue<TCB, vector<TCB>, LessThanByPriority> pq;
+typedef priority_queue<TCB*, vector<TCB*>, LessThanByPriority> pq;
 // END PRIORITY QUEUE SETUP
 
-pq priorThreads;
+pq readyThreads;
 pq sleepThreads;
 
 void threadSchedule(){
@@ -70,10 +70,7 @@ void idleThread(void*){
 }
 
 
-void threadWrapper(void* thread){
-	// thread->entryCB(thread->param);
-	// VMThreadTerminate(thread->id);
-}
+
 
 TVMStatus VMStart(int tickms, int argc, char *argv[]){
 	int flag = false;
@@ -180,7 +177,14 @@ TVMStatus VMThreadDelete(TVMThreadID thread){
    }
 }
 
+void threadWrapper(void* ){
+	for(unsigned i = 0;i < threadList.size(); i++){
+		if(threadList[i]->id == curThreadID)
+			threadList[i]->entryCB(thread->param);
+	}
 
+	//VMThreadTerminate(t->id);
+}
 
 TVMStatus VMThreadActivate(TVMThreadID thread){
 	bool found = false;
@@ -197,6 +201,10 @@ TVMStatus VMThreadActivate(TVMThreadID thread){
         	void* stackaddr = (void*)malloc(threadList[i]->mmSize);
         	MachineContextCreate( mtContext, threadWrapper , &threadList[i], stackaddr, threadList[i]->mmSize);
         	threadList[i]->context = *mtContext;
+        	threadList[i]->state = VM_THREAD_STATE_READY;
+        	curThreadID = threadList[i]->id;
+        	readyThreads.push(threadList[i]);
+
         	
 
 
