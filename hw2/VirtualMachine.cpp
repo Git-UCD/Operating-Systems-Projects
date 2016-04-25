@@ -71,8 +71,8 @@ void idleThread(void*){
 
 
 void threadWrapper(void* thread){
-	thread->entryCB(thread->param);
-	VMThreadTerminate(thread->id);
+	// thread->entryCB(thread->param);
+	// VMThreadTerminate(thread->id);
 }
 
 TVMStatus VMStart(int tickms, int argc, char *argv[]){
@@ -146,16 +146,14 @@ TVMStatus VMTickCount(TVMTickRef tickref){
 
 
 TVMStatus VMThreadCreate(TVMThreadEntry entry, void *param, TVMMemorySize memsize, TVMThreadPriority prio, TVMThreadIDRef tid){
-  MachineSuspendSignals(sigstate);
-  TCB* tcb = new TCB;
-  
-  
+ // MachineSuspendSignals(sigstate);
+
   
 	if(entry == NULL || tid == NULL ){
 		return VM_STATUS_FAILURE;
 	}
 
-	TCB *threadB;
+	TCB *threadB = new TCB;
 	threadB->mmSize = memsize;
 	threadB->priority = prio;
 	*tid = threadCount;
@@ -166,7 +164,7 @@ TVMStatus VMThreadCreate(TVMThreadEntry entry, void *param, TVMMemorySize memsiz
 	threadB->state = VM_THREAD_STATE_DEAD;
 	threadList.push_back(threadB);
 
-	MachineResumeSignals(sigstate);
+	//MachineResumeSignals(sigstate);
 	//priorThreads.push(threadB);
 	
 return VM_STATUS_SUCCESS; 
