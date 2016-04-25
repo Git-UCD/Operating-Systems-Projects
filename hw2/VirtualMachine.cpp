@@ -4,6 +4,7 @@
 #include <queue>
 #include <vector>
 #include <stdlib.h>
+#include <iterator>
 
 using namespace std;
 extern "C" {
@@ -14,6 +15,7 @@ static const int MED = 2;
 static const int LOW = 1;
 TMachineSignalStateRef sigstate;
 
+volatile int threadCount = 1;
 
 
 
@@ -32,9 +34,9 @@ class TCB{
 	
 };
 //Contains all thread create to lookup
-vector<TCB> threadList;
+vector<TCB*> threadList;
 
-TVMThreadID curThreadID = NULL; // current operating thread
+TVMThreadID curThreadID; // current operating thread
 
 
 //PRIORITY QUEUE SETUP
@@ -69,8 +71,8 @@ void idleThread(void*){
 
 
 void threadWrapper(void* thread){
-	// thread->entryCB(thread->param);
-	// VMThreadTerminate(thread->id);
+	thread->entryCB(thread->param);
+	VMThreadTerminate(thread->id);
 }
 
 TVMStatus VMStart(int tickms, int argc, char *argv[]){
@@ -85,8 +87,6 @@ TVMStatus VMStart(int tickms, int argc, char *argv[]){
 
 		
 
-	// cout << "TIMER:" << TIMER << endl;
-	int flag = false;
 
 	TMachineAlarmCallback callback = callbackAlarm;
 	MachineRequestAlarm(tickms*1000,callback,&flag);
@@ -96,23 +96,24 @@ TVMStatus VMStart(int tickms, int argc, char *argv[]){
         startB.state = VM_THREAD_STATE_WAITING;
         //main thread
         TCB* tstartBlk = new TCB;
-  tstartBlk->id = 0;
-  tstartBlk->idref = 0;
-  tstartBlk->priority = VM_THREAD_PRIORITY_NORMAL;
-  tstartBlk->state = VM_THREAD_STATE_RUNNING;
-  tstartBlk->mmSize = 0;
-  tstartBlk->vmTick = 0;
+		tstartBlk->id = threadCount++;
+		tstartBlk->idref = 0;
+		tstartBlk->priority = VM_THREAD_PRIORITY_NORMAL;
+		tstartBlk->state = VM_THREAD_STATE_RUNNING;
+		tstartBlk->mmSize = 0;
+		tstartBlk->vmTick = 0;
 
         // SMachineContextRef startContext = new SMachineContext;
         // MachineContextSwitch(NULL,startContext);
         // startB.context = *startContext;
 
         
-        TCB idleB;
-        idleB.entryCB = idleThread;
-        idleB.priority = VM_THREAD_PRIORITY_LOW;
-        idleB.state = VM_THREAD_STATE_READY;
-        idleB.mmSize = 0x10000;
+        TCB *idleB = new TCB;
+        idleB->entryCB = idleThread;
+        idleB->priority = VM_THREAD_PRIORITY_LOW;
+        idleB->state = VM_THREAD_STATE_READY;
+        idleB->mmSize = 0x10000;
+        idleB->id = threadCount++;
         //threadList.push_back(startB);
         threadList.push_back(idleB);
 
@@ -148,29 +149,35 @@ TVMStatus VMThreadCreate(TVMThreadEntry entry, void *param, TVMMemorySize memsiz
   MachineSuspendSignals(sigstate);
   TCB* tcb = new TCB;
   
-  MachineResumeSignals(sigstate);
+  
   
 	if(entry == NULL || tid == NULL ){
 		return VM_STATUS_FAILURE;
 	}
 
-	TCB threadB;
-	threadB.mmSize = memsize;
-	threadB.priority = prio;
-	threadB.id = *tid;
-	threadB.entryCB = entry;
-	threadB.param = param;
-	threadB.state = VM_THREAD_STATE_DEAD;
+	TCB *threadB;
+	threadB->mmSize = memsize;
+	threadB->priority = prio;
+	*tid = threadCount;
+	threadB->id = threadCount++;
+
+	threadB->entryCB = entry;
+	threadB->param = param;
+	threadB->state = VM_THREAD_STATE_DEAD;
 	threadList.push_back(threadB);
-	priorThreads.push(threadB);
+
+	MachineResumeSignals(sigstate);
+	//priorThreads.push(threadB);
 	
 return VM_STATUS_SUCCESS; 
 }
 
 TVMStatus VMThreadDelete(TVMThreadID thread){
-	for(unsigned int i = 0;i < threadList.size();i++){
-        if(threadList[i].id == thread){
+	vector<TCB*>::iterator iter;
+	for(iter = threadList.begin();iter != threadList.end();iter++){
+        if((*iter)->id == thread){
 			// delete thread
+			threadList.erase(iter);
       }
    }
 }
@@ -181,17 +188,17 @@ TVMStatus VMThreadActivate(TVMThreadID thread){
 	bool found = false;
 	// find  thread with matching id given
 	for  (unsigned int i = 0;i < threadList.size();i++){
-        if(threadList[i].id == thread){
+        if(threadList[i]->id == thread){
 
         	found = true;
-        	if ( threadList[i].state != VM_THREAD_STATE_DEAD){
+        	if ( threadList[i]->state != VM_THREAD_STATE_DEAD){
         		return VM_STATUS_ERROR_INVALID_STATE;
         	}
         	// activate thread
         	SMachineContextRef  mtContext  = new SMachineContext;
-        	void* stackaddr = (void*)malloc(threadList[i].mmSize);
-        	MachineContextCreate( mtContext, threadWrapper , &threadList[i], stackaddr, threadList[i].mmSize);\
-        	threadList[i].context = *mtContext;
+        	void* stackaddr = (void*)malloc(threadList[i]->mmSize);
+        	MachineContextCreate( mtContext, threadWrapper , &threadList[i], stackaddr, threadList[i]->mmSize);
+        	threadList[i]->context = *mtContext;
         	
 
 
@@ -209,10 +216,10 @@ TVMStatus VMThreadTerminate(TVMThreadID thread){
 	bool found = false;
 	// find  thread with matching id given
 	for(unsigned int i = 0;i < threadList.size();i++){
-        if(threadList[i].id == thread){
+        if(threadList[i]->id == thread){
         	// thread enters the dead state
         	found = true;
-        	if(threadList[i].state == VM_THREAD_STATE_DEAD ){
+        	if(threadList[i]->state == VM_THREAD_STATE_DEAD ){
         		return VM_STATUS_ERROR_INVALID_STATE;
         	}
 	}
@@ -228,7 +235,7 @@ TVMStatus VMThreadID(TVMThreadIDRef threadref){
 	if(threadref == NULL){
 		return VM_STATUS_ERROR_INVALID_PARAMETER;
 	}
-	//threadref = curThreadID;
+	// threadref = curThreadID;
 	return VM_STATUS_SUCCESS;
 }
 
@@ -239,7 +246,7 @@ TVMStatus VMThreadState(TVMThreadID thread, TVMThreadStateRef stateref){
 	bool found = false;
 	// find  thread with matching id given
 	for(unsigned int i = 0;i < threadList.size();i++){
-        if(threadList[i].id == thread){
+        if(threadList[i]->id == thread){
         	// delete thread
         	found = true;
 		}
@@ -315,6 +322,7 @@ TVMStatus VMFileOpen(const char *filename, int flags, int mode, int *filedescrip
  return VM_STATUS_SUCCESS;
  
 }
+
 volatile bool closeDone = false;
 void fileCloseCallback(void* calldata,int result){
 	closeDone = true;
