@@ -52,30 +52,51 @@ typedef priority_queue<TCB*, vector<TCB*>, LessThanByPriority> pq;
 // END PRIORITY QUEUE SETUP
 
 pq readyThreads;
-pq sleepThreads;
+vector<TCB*> sleepThreads;
 
 void threadSchedule(){
 
-	//cout << "starting schedule" << endl;
+  //cout << "starting schedule" << endl;
 
-	// cout << "readythread id: " << readyThreads.top()->id << endl;
-	// cout << "curThreadID: " << curThreadID << endl;
-	SMachineContextRef oldContext = NULL;
-	for (unsigned int i = 0; i < threadList.size();i++){
-		if(curThreadID == threadList[i]->id){
-			oldContext = &threadList[i]->context;
-		}
-	}
+  // cout << "readythread id: " << readyThreads.top()->id << endl;
+  // cout << "curThreadID: " << curThreadID << endl;
+  TCB* currentThread;
+  for(unsigned int i = 0; i < threadList.size(); i++){
+    if(curThreadID == threadList[i]->id){
+      currentThread = threadList[i];
+    }   
+  }
+  if(currentThread->state == VM_THREAD_STATE_RUNNING){
+    currentThread->state = VM_THREAD_STATE_READY; 
+  }
+  if(currentThread->state == VM_THREAD_STATE_READY){
+    //PUSH INTO PRIORITY QUEUE: readyThreads;
+    readyThreads.push(currentThread);
+  }
+  if(currentThread->state == VM_THREAD_STATE_WAITING && currentThread->vmTick != 0){ 
+    //PUSH INTO SLEEPING QUEUE: sleepThreads;
+    sleepThreads.push(currentThread);
+
+  }
 
 
-	SMachineContextRef newContext = &readyThreads.top()->context;
-	curThreadID = readyThreads.top()->id;
-	MachineContextSwitch(oldContext,newContext);
-	readyThreads.pop();
+  SMachineContextRef oldContext = NULL;
+  for (unsigned int i = 0; i < threadList.size();i++){
+    if(curThreadID == threadList[i]->id){
+      oldContext = &threadList[i]->context;
+    }   
+  }
+
+
+  SMachineContextRef newContext = &readyThreads.top()->context;
+  curThreadID = readyThreads.top()->id;
+  currentThread->state = VM_THREAD_STATE_RUNNING;
+  MachineContextSwitch(oldContext,newContext);
+  readyThreads.pop();
 
 
 
-	
+  
 }
 
 
@@ -84,7 +105,8 @@ TVMStatus VMFilePrint(int filedescriptor, const char *format, ...);
 
 void  callbackAlarm( void* t){
 	TIMER--;
-	//threadSchedule();
+
+	threadSchedule();
 }
 
 void idleThread(void*){
@@ -150,7 +172,7 @@ TVMStatus VMTickMS(int *tickmsref){
 	if(tickmsref == NULL){
 		return VM_STATUS_ERROR_INVALID_PARAMETER;
 	}
-	//tickmsref = 
+	tickmsref = TIMER;
 	return VM_STATUS_SUCCESS; 
 }
 
@@ -296,6 +318,29 @@ TVMStatus VMThreadState(TVMThreadID thread, TVMThreadStateRef stateref){
 }
 
 
+TCB* getTCB(TVMThreadID getID){
+	for(unsigned int i = 0;i < threadList.size();i++){
+		if (threadList[i].id == getID){
+			return threadList[i];
+		}
+	}
+
+}
+
+void  callbackAlarm( void* t){
+	TIMER--;
+
+	for(unsigned int i = 0; i < sleepThreads.size();i++){
+		sleepQ.vmTick--;
+		if (sleepThreads.vmTick == 0){
+			if(sleepThreads.state == VM_THREAD_STATE_READY ){
+				readyThreads.push(sleepThreads);
+			}
+		} 
+	}
+
+	threadSchedule();
+}
 
 TVMStatus VMThreadSleep(TVMTick tick){
 	if (tick == VM_TIMEOUT_INFINITE){
@@ -307,7 +352,11 @@ TVMStatus VMThreadSleep(TVMTick tick){
 	}
 	else{
 	// put current thread to sleep
+		
 		TIMER = tick;
+		currentThread = tick;
+
+		sleepThreads.push_back(currentThread);
 		while(TIMER != 0){
 		}
 		
