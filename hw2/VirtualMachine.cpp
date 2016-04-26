@@ -60,7 +60,7 @@ void threadSchedule(){
 
 	// cout << "readythread id: " << readyThreads.top()->id << endl;
 	// cout << "curThreadID: " << curThreadID << endl;
-	SMachineContextRef oldContext;
+	SMachineContextRef oldContext = NULL;
 	for (unsigned int i = 0; i < threadList.size();i++){
 		if(curThreadID == threadList[i]->id){
 			oldContext = &threadList[i]->context;
@@ -70,8 +70,9 @@ void threadSchedule(){
 
 	SMachineContextRef newContext = &readyThreads.top()->context;
 	curThreadID = readyThreads.top()->id;
-	//cout << "context switch" << endl;
 	MachineContextSwitch(oldContext,newContext);
+	readyThreads.pop();
+
 
 
 	
@@ -83,7 +84,7 @@ TVMStatus VMFilePrint(int filedescriptor, const char *format, ...);
 
 void  callbackAlarm( void* t){
 	TIMER--;
-
+	//threadSchedule();
 }
 
 void idleThread(void*){
@@ -149,6 +150,7 @@ TVMStatus VMTickMS(int *tickmsref){
 	if(tickmsref == NULL){
 		return VM_STATUS_ERROR_INVALID_PARAMETER;
 	}
+	//tickmsref = 
 	return VM_STATUS_SUCCESS; 
 }
 
@@ -205,14 +207,10 @@ TVMStatus VMThreadDelete(TVMThreadID thread){
    return VM_STATUS_SUCCESS; 
 }
 
-void threadWrapper(void* ){
-	//cout << "wrapper running" << endl;
-	for(unsigned i = 0;i < threadList.size(); i++){
-		if(threadList[i]->id == curThreadID)
-			threadList[i]->entryCB(threadList[i]->param);
-	}
+void threadWrapper(void* thread ){
+	((TCB*)thread)->entryCB(((TCB*)thread)->param);
 
-	VMThreadTerminate(curThreadID);
+	VMThreadTerminate( ((TCB*)thread)->id);
 }
 
 TVMStatus VMThreadActivate(TVMThreadID thread){
@@ -228,7 +226,7 @@ TVMStatus VMThreadActivate(TVMThreadID thread){
         	// activate thread
         	SMachineContextRef  mtContext  = new SMachineContext;
         	void* stackaddr = (void*)malloc(threadList[i]->mmSize);
-        	MachineContextCreate( mtContext, threadWrapper , threadList[i]->param, stackaddr, threadList[i]->mmSize);
+        	MachineContextCreate( mtContext, threadWrapper , threadList[i], stackaddr, threadList[i]->mmSize);
         	threadList[i]->context = *mtContext;
         	threadList[i]->state = VM_THREAD_STATE_READY;
         	//curThreadID = threadList[i]->id;
@@ -248,6 +246,7 @@ TVMStatus VMThreadActivate(TVMThreadID thread){
 
 TVMStatus VMThreadTerminate(TVMThreadID thread){
 	bool found = false;
+
 	// find  thread with matching id given
 	for(unsigned int i = 0;i < threadList.size();i++){
         if(threadList[i]->id == thread){
@@ -256,7 +255,6 @@ TVMStatus VMThreadTerminate(TVMThreadID thread){
         	if(threadList[i]->state == VM_THREAD_STATE_DEAD ){
         		return VM_STATUS_ERROR_INVALID_STATE;
         	}
-
         	threadList[i]->state = VM_THREAD_STATE_DEAD;
         	// release mutex
         	// schedule other thread
@@ -311,7 +309,6 @@ TVMStatus VMThreadSleep(TVMTick tick){
 	// put current thread to sleep
 		TIMER = tick;
 		while(TIMER != 0){
-
 		}
 		
 		threadSchedule();
