@@ -5,6 +5,7 @@
 #include <vector>
 #include <stdlib.h>
 #include <iterator>
+#include <string>
 
 using namespace std;
 extern "C" {
@@ -31,6 +32,7 @@ class TCB{
 	TVMThreadEntry entryCB;
 	void* param;
 	SMachineContext context;
+	string name;
 	
 };
 //Contains all thread create to lookup
@@ -54,6 +56,25 @@ pq sleepThreads;
 
 void threadSchedule(){
 
+	//cout << "starting schedule" << endl;
+
+	// cout << "readythread id: " << readyThreads.top()->id << endl;
+	// cout << "curThreadID: " << curThreadID << endl;
+	SMachineContextRef oldContext;
+	for (unsigned int i = 0; i < threadList.size();i++){
+		if(curThreadID == threadList[i]->id){
+			oldContext = &threadList[i]->context;
+		}
+	}
+
+
+	SMachineContextRef newContext = &readyThreads.top()->context;
+	curThreadID = readyThreads.top()->id;
+	//cout << "context switch" << endl;
+	MachineContextSwitch(oldContext,newContext);
+
+
+	
 }
 
 
@@ -111,6 +132,7 @@ TVMStatus VMStart(int tickms, int argc, char *argv[]){
         idleB->id = threadCount++;
         threadList.push_back(tstartBlk);
         threadList.push_back(idleB);
+        curThreadID = tstartBlk->id;
 
 
 
@@ -184,6 +206,7 @@ TVMStatus VMThreadDelete(TVMThreadID thread){
 }
 
 void threadWrapper(void* ){
+	//cout << "wrapper running" << endl;
 	for(unsigned i = 0;i < threadList.size(); i++){
 		if(threadList[i]->id == curThreadID)
 			threadList[i]->entryCB(threadList[i]->param);
@@ -208,7 +231,8 @@ TVMStatus VMThreadActivate(TVMThreadID thread){
         	MachineContextCreate( mtContext, threadWrapper , threadList[i]->param, stackaddr, threadList[i]->mmSize);
         	threadList[i]->context = *mtContext;
         	threadList[i]->state = VM_THREAD_STATE_READY;
-        	curThreadID = threadList[i]->id;
+        	//curThreadID = threadList[i]->id;
+    
         	readyThreads.push(threadList[i]);
 
        
@@ -289,6 +313,8 @@ TVMStatus VMThreadSleep(TVMTick tick){
 		while(TIMER != 0){
 
 		}
+		
+		threadSchedule();
 	}
 
 	return VM_STATUS_SUCCESS;
