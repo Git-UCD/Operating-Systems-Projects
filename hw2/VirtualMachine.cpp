@@ -39,6 +39,7 @@ class TCB{
 vector<TCB*> threadList;
 
 TVMThreadID curThreadID; // current operating thread
+TCB* curThread;
 
 
 //PRIORITY QUEUE SETUP
@@ -75,7 +76,7 @@ void threadSchedule(){
   }
   if(currentThread->state == VM_THREAD_STATE_WAITING && currentThread->vmTick != 0){ 
     //PUSH INTO SLEEPING QUEUE: sleepThreads;
-    sleepThreads.push(currentThread);
+    sleepThreads.push_back(currentThread);
 
   }
 
@@ -99,15 +100,24 @@ void threadSchedule(){
   
 }
 
+void  callbackAlarm( void* t){
+	TIMER--;
+	vector<TCB*>::iterator iter;
+	for(iter = sleepThreads.begin(); iter != sleepThreads.end();iter++){
+		(*iter)->vmTick--;
+		if ( (*iter)->vmTick == 0){
+			(*iter)->state = VM_THREAD_STATE_READY; 
+			readyThreads.push(*iter);
+			sleepThreads.erase(iter);
+		} 
+	}
+	threadSchedule();
+}
+
 
 TVMMainEntry VMLoadModule(const char *module);
 TVMStatus VMFilePrint(int filedescriptor, const char *format, ...);
 
-void  callbackAlarm( void* t){
-	TIMER--;
-
-	threadSchedule();
-}
 
 void idleThread(void*){
 	while(true);
@@ -172,7 +182,7 @@ TVMStatus VMTickMS(int *tickmsref){
 	if(tickmsref == NULL){
 		return VM_STATUS_ERROR_INVALID_PARAMETER;
 	}
-	tickmsref = TIMER;
+	*tickmsref = (curThread->vmTick);
 	return VM_STATUS_SUCCESS; 
 }
 
@@ -318,29 +328,9 @@ TVMStatus VMThreadState(TVMThreadID thread, TVMThreadStateRef stateref){
 }
 
 
-TCB* getTCB(TVMThreadID getID){
-	for(unsigned int i = 0;i < threadList.size();i++){
-		if (threadList[i].id == getID){
-			return threadList[i];
-		}
-	}
 
-}
 
-void  callbackAlarm( void* t){
-	TIMER--;
 
-	for(unsigned int i = 0; i < sleepThreads.size();i++){
-		sleepQ.vmTick--;
-		if (sleepThreads.vmTick == 0){
-			if(sleepThreads.state == VM_THREAD_STATE_READY ){
-				readyThreads.push(sleepThreads);
-			}
-		} 
-	}
-
-	threadSchedule();
-}
 
 TVMStatus VMThreadSleep(TVMTick tick){
 	if (tick == VM_TIMEOUT_INFINITE){
@@ -354,9 +344,9 @@ TVMStatus VMThreadSleep(TVMTick tick){
 	// put current thread to sleep
 		
 		TIMER = tick;
-		currentThread = tick;
+		curThread->vmTick = tick;
 
-		sleepThreads.push_back(currentThread);
+		sleepThreads.push_back(curThread);
 		while(TIMER != 0){
 		}
 		
