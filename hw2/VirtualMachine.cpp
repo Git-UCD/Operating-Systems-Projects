@@ -14,7 +14,7 @@ volatile int TIMER;
 static const int HIGH = 3;
 static const int MED = 2;
 static const int LOW = 1;
-TMachineSignalStateRef sigstate;
+TMachineSignalState sigstate;
 
 volatile int threadCount = 1;
 
@@ -32,7 +32,6 @@ class TCB{
 	TVMThreadEntry entryCB;
 	void* param;
 	SMachineContext context;
-	string name;
 	
 };
 
@@ -61,6 +60,7 @@ void threadSchedule(){
       currentThread = threadList[i];
     }   
   }
+  // cout << "current id: " << currentThread->id <<  endl;
   if(currentThread->state == VM_THREAD_STATE_RUNNING){
     currentThread->state = VM_THREAD_STATE_READY; 
   }
@@ -101,7 +101,7 @@ TCB* getTCB(TVMThreadID id){
 }
 
 void  callbackAlarm( void* t){
-
+	cout << "callback" << endl;
 	TIMER--;
 	vector<TCB*>::iterator iter;
 
@@ -112,23 +112,27 @@ void  callbackAlarm( void* t){
 			(*iter)->state = VM_THREAD_STATE_READY; 
 			readyThreads.push(*iter);
 			sleepThreads.erase(iter);
-			break;
+			threadSchedule();
+			
 		}
+			
 		(*iter)->vmTick--; 
 	}
-	threadSchedule();
+	
+
 }
 
 
 TVMMainEntry VMLoadModule(const char *module);
 TVMStatus VMFilePrint(int filedescriptor, const char *format, ...);
 
-
 void idleThread(void*){
+	cout << "idlethread" << endl;
+	MachineResumeSignals(&sigstate);
 	while(true);
+	MachineResumeSignals(&sigstate);
+
 }
-
-
 
 
 TVMStatus VMStart(int tickms, int argc, char *argv[]){
@@ -156,8 +160,8 @@ TVMStatus VMStart(int tickms, int argc, char *argv[]){
 	tstartBlk->state = VM_THREAD_STATE_RUNNING;
 	tstartBlk->mmSize = 0;
 	tstartBlk->vmTick = 0;
-	
-	//MachineContextSwitch(NULL,startContext);
+	// SMachineContextRef startContext;
+	// MachineContextSwitch(NULL,startContext);
 
     // SMachineContextRef startContext = new SMachineContext;
     // MachineContextSwitch(NULL,startContext);
@@ -170,6 +174,10 @@ TVMStatus VMStart(int tickms, int argc, char *argv[]){
     idleB->state = VM_THREAD_STATE_READY;
     idleB->mmSize = 0x10000;
     idleB->id = threadCount++;
+    SMachineContextRef idleContext = new SMachineContext;
+    void* stackaddr = (void*)malloc(idleB->mmSize);
+    MachineContextCreate( idleContext, idleB->entryCB , idleB, stackaddr, idleB->mmSize);
+    idleB ->context = *idleContext;
 
     threadList.push_back(tstartBlk);
     threadList.push_back(idleB);
@@ -204,7 +212,7 @@ TVMStatus VMTickCount(TVMTickRef tickref){
 
 
 TVMStatus VMThreadCreate(TVMThreadEntry entry, void *param, TVMMemorySize memsize, TVMThreadPriority prio, TVMThreadIDRef tid){
- // MachineSuspendSignals(sigstate);
+ MachineSuspendSignals(&sigstate);
 
 	if(entry == NULL || tid == NULL ){
 		return VM_STATUS_FAILURE;
@@ -221,13 +229,15 @@ TVMStatus VMThreadCreate(TVMThreadEntry entry, void *param, TVMMemorySize memsiz
 	threadB->state = VM_THREAD_STATE_DEAD;
 	threadList.push_back(threadB);
 
-	//MachineResumeSignals(sigstate);
+	MachineResumeSignals(&sigstate);
 
 	
 return VM_STATUS_SUCCESS; 
 }
 
 TVMStatus VMThreadDelete(TVMThreadID thread){
+	 MachineSuspendSignals(&sigstate);
+
 	bool found = false;
 	vector<TCB*>::iterator iter;
 	for(iter = threadList.begin();iter != threadList.end();iter++){
@@ -241,6 +251,7 @@ TVMStatus VMThreadDelete(TVMThreadID thread){
    if(!found){
    	return VM_STATUS_ERROR_INVALID_ID;
    }
+   MachineResumeSignals(&sigstate);
 
    return VM_STATUS_SUCCESS; 
 }
@@ -252,6 +263,9 @@ void threadWrapper(void* thread ){
 }
 
 TVMStatus VMThreadActivate(TVMThreadID thread){
+	// cout << "Activate: " << thread << endl;
+	MachineSuspendSignals(&sigstate);
+
 	bool found = false;
 	// find  thread with matching id given
 	for  (unsigned int i = 0;i < threadList.size();i++){
@@ -272,16 +286,22 @@ TVMStatus VMThreadActivate(TVMThreadID thread){
         	readyThreads.push(threadList[i]);
 
 		}
+		
     }
+    threadSchedule();
 
     if(!found){
     	return VM_STATUS_ERROR_INVALID_ID;
     }
+    MachineResumeSignals(&sigstate);
 
     return VM_STATUS_SUCCESS;
 }
 
 TVMStatus VMThreadTerminate(TVMThreadID thread){
+	// cout << "terminate: " << thread << endl;
+	MachineSuspendSignals(&sigstate);
+
 	bool found = false;
 
 	// find  thread with matching id given
@@ -297,10 +317,13 @@ TVMStatus VMThreadTerminate(TVMThreadID thread){
         	// schedule other thread
         }
     }
+    threadSchedule();
 
     if(!found){
     	return VM_STATUS_ERROR_INVALID_ID;
     }
+    MachineResumeSignals(&sigstate);
+
     return VM_STATUS_SUCCESS;
 }
 
@@ -336,6 +359,7 @@ TVMStatus VMThreadState(TVMThreadID thread, TVMThreadStateRef stateref){
 
 
 TVMStatus VMThreadSleep(TVMTick tick){
+// cout << "sleep thread" << endl;
 	TCB* thread;
 	if (tick == VM_TIMEOUT_INFINITE){
 		return VM_STATUS_ERROR_INVALID_PARAMETER;
@@ -346,19 +370,21 @@ TVMStatus VMThreadSleep(TVMTick tick){
 	}
 	else{
 	// put current thread to sleep
-		
 		TIMER = tick;
 		thread = getTCB(curThreadID);
 		thread->vmTick = tick;
 		thread->state = VM_THREAD_STATE_WAITING;
 		sleepThreads.push_back(thread);
+
+		//cout << "thread id: " << thread->id << endl;
 	
 
-		while(TIMER != 0){
-		}
+		// while(TIMER != 0){
+		// }
 		
-		//threadSchedule();
+		
 	}
+	threadSchedule();
 
 	return VM_STATUS_SUCCESS;
 }
