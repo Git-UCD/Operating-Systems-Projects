@@ -106,9 +106,9 @@ void  callbackAlarm( void* t){
 	vector<TCB*>::iterator iter;
 
 	for(iter = sleepThreads.begin(); iter != sleepThreads.end();iter++){
-		cout << "thread ticks: " << (*iter)->vmTick << endl;
+		//cout << "thread ticks: " << (*iter)->vmTick << endl;
 		if ( (*iter)->vmTick == 0){
-			cout << "timeout:" << endl;
+			//cout << "timeout:" << endl;
 			(*iter)->state = VM_THREAD_STATE_READY; 
 			readyThreads.push(*iter);
 			sleepThreads.erase(iter);
@@ -175,6 +175,8 @@ TVMStatus VMStart(int tickms, int argc, char *argv[]){
     threadList.push_back(idleB);
     curThreadID = tstartBlk->id;
     curThread = tstartBlk;
+    readyThreads.push(idleB);
+    readyThreads.push(tstartBlk);
 
 
 
@@ -348,6 +350,7 @@ TVMStatus VMThreadSleep(TVMTick tick){
 		TIMER = tick;
 		thread = getTCB(curThreadID);
 		thread->vmTick = tick;
+		thread->state = VM_THREAD_STATE_WAITING;
 		sleepThreads.push_back(thread);
 	
 
