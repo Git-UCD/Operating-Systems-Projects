@@ -35,34 +35,28 @@ class TCB{
 	string name;
 	
 };
-//Contains all thread create to lookup
+
 vector<TCB*> threadList;
 
 TVMThreadID curThreadID; // current operating thread
 TCB* curThread;
 
 
-//PRIORITY QUEUE SETUP
-//WILL RETURN HIGH PRIORITY > MED PRIORITY > LOW PRIORITY
+
 struct LessThanByPriority{
   bool operator()(const TCB* lhs, const TCB* rhs) const{
     return lhs->priority < rhs->priority;
   }
 };
 typedef priority_queue<TCB*, vector<TCB*>, LessThanByPriority> pq;
-// END PRIORITY QUEUE SETUP
+
 
 pq readyThreads;
 vector<TCB*> sleepThreads;
 
 void threadSchedule(){
-
-  //cout << "starting schedule" << endl;
-
-  // cout << "readythread id: " << readyThreads.top()->id << endl;
-  // cout << "curThreadID: " << curThreadID << endl;
-  TCB* currentThread;
-  for(unsigned int i = 0; i < threadList.size(); i++){
+   TCB* currentThread;
+   for(unsigned int i = 0; i < threadList.size(); i++){
     if(curThreadID == threadList[i]->id){
       currentThread = threadList[i];
     }   
@@ -80,7 +74,6 @@ void threadSchedule(){
 
   }
 
-
   SMachineContextRef oldContext = NULL;
   for (unsigned int i = 0; i < threadList.size();i++){
     if(curThreadID == threadList[i]->id){
@@ -88,28 +81,40 @@ void threadSchedule(){
     }   
   }
 
-
+  // cout << "switch " << endl;
+  // if (readyThreads.empty()){
+  // 	cout << "empty" << endl;
+  // }
   SMachineContextRef newContext = &readyThreads.top()->context;
   curThreadID = readyThreads.top()->id;
   currentThread->state = VM_THREAD_STATE_RUNNING;
   MachineContextSwitch(oldContext,newContext);
   readyThreads.pop();
+}
 
-
-
-  
+TCB* getTCB(TVMThreadID id){
+	for (unsigned int i = 0;i < threadList.size();i++){
+		if (id == threadList[i]->id){
+			return threadList[i];
+		}
+	}
 }
 
 void  callbackAlarm( void* t){
+
 	TIMER--;
 	vector<TCB*>::iterator iter;
+
 	for(iter = sleepThreads.begin(); iter != sleepThreads.end();iter++){
-		(*iter)->vmTick--;
+		cout << "thread ticks: " << (*iter)->vmTick << endl;
 		if ( (*iter)->vmTick == 0){
+			cout << "timeout:" << endl;
 			(*iter)->state = VM_THREAD_STATE_READY; 
 			readyThreads.push(*iter);
 			sleepThreads.erase(iter);
-		} 
+			break;
+		}
+		(*iter)->vmTick--; 
 	}
 	threadSchedule();
 }
@@ -143,39 +148,39 @@ TVMStatus VMStart(int tickms, int argc, char *argv[]){
 	MachineRequestAlarm(tickms*1000,callback,&flag);
         // setup information for the main and idle thread
        
-        //main thread
-        TCB* tstartBlk = new TCB;
-		tstartBlk->id = threadCount++;
-		tstartBlk->idref = 0;
-		tstartBlk->priority = VM_THREAD_PRIORITY_NORMAL;
-		tstartBlk->state = VM_THREAD_STATE_RUNNING;
-		tstartBlk->mmSize = 0;
-		tstartBlk->vmTick = 0;
+    //main thread
+    TCB* tstartBlk = new TCB;
+	tstartBlk->id = threadCount++;
+	tstartBlk->idref = 0;
+	tstartBlk->priority = VM_THREAD_PRIORITY_NORMAL;
+	tstartBlk->state = VM_THREAD_STATE_RUNNING;
+	tstartBlk->mmSize = 0;
+	tstartBlk->vmTick = 0;
+	
+	//MachineContextSwitch(NULL,startContext);
 
-        // SMachineContextRef startContext = new SMachineContext;
-        // MachineContextSwitch(NULL,startContext);
-        // startB.context = *startContext;
+    // SMachineContextRef startContext = new SMachineContext;
+    // MachineContextSwitch(NULL,startContext);
+    // startB.context = *startContext;
 
-        
-        TCB *idleB = new TCB;
-        idleB->entryCB = idleThread;
-        idleB->priority = VM_THREAD_PRIORITY_LOW;
-        idleB->state = VM_THREAD_STATE_READY;
-        idleB->mmSize = 0x10000;
-        idleB->id = threadCount++;
-        threadList.push_back(tstartBlk);
-        threadList.push_back(idleB);
-        curThreadID = tstartBlk->id;
+    
+    TCB *idleB = new TCB;
+    idleB->entryCB = idleThread;
+    idleB->priority = VM_THREAD_PRIORITY_LOW;
+    idleB->state = VM_THREAD_STATE_READY;
+    idleB->mmSize = 0x10000;
+    idleB->id = threadCount++;
 
-
-
-        mainEntry(argc,argv);
-        MachineTerminate();
-        return VM_STATUS_SUCCESS;
-      
-        
+    threadList.push_back(tstartBlk);
+    threadList.push_back(idleB);
+    curThreadID = tstartBlk->id;
+    curThread = tstartBlk;
 
 
+
+    mainEntry(argc,argv);
+    MachineTerminate();
+    return VM_STATUS_SUCCESS;
 }
 
 TVMStatus VMTickMS(int *tickmsref){
@@ -199,7 +204,6 @@ TVMStatus VMTickCount(TVMTickRef tickref){
 TVMStatus VMThreadCreate(TVMThreadEntry entry, void *param, TVMMemorySize memsize, TVMThreadPriority prio, TVMThreadIDRef tid){
  // MachineSuspendSignals(sigstate);
 
-  
 	if(entry == NULL || tid == NULL ){
 		return VM_STATUS_FAILURE;
 	}
@@ -216,7 +220,7 @@ TVMStatus VMThreadCreate(TVMThreadEntry entry, void *param, TVMMemorySize memsiz
 	threadList.push_back(threadB);
 
 	//MachineResumeSignals(sigstate);
-	//priorThreads.push(threadB);
+
 	
 return VM_STATUS_SUCCESS; 
 }
@@ -265,7 +269,6 @@ TVMStatus VMThreadActivate(TVMThreadID thread){
     
         	readyThreads.push(threadList[i]);
 
-       
 		}
     }
 
@@ -330,9 +333,8 @@ TVMStatus VMThreadState(TVMThreadID thread, TVMThreadStateRef stateref){
 
 
 
-
-
 TVMStatus VMThreadSleep(TVMTick tick){
+	TCB* thread;
 	if (tick == VM_TIMEOUT_INFINITE){
 		return VM_STATUS_ERROR_INVALID_PARAMETER;
 	}
@@ -344,13 +346,15 @@ TVMStatus VMThreadSleep(TVMTick tick){
 	// put current thread to sleep
 		
 		TIMER = tick;
-		curThread->vmTick = tick;
+		thread = getTCB(curThreadID);
+		thread->vmTick = tick;
+		sleepThreads.push_back(thread);
+	
 
-		sleepThreads.push_back(curThread);
 		while(TIMER != 0){
 		}
 		
-		threadSchedule();
+		//threadSchedule();
 	}
 
 	return VM_STATUS_SUCCESS;
