@@ -58,6 +58,7 @@ void threadSchedule(){
    for(unsigned int i = 0; i < threadList.size(); i++){
     if(curThreadID == threadList[i]->id){
       currentThread = threadList[i];
+      //cout << "currentThread ID: " << currentThread->id << endl;
     }   
   }
   // cout << "current id: " << currentThread->id <<  endl;
@@ -68,16 +69,20 @@ void threadSchedule(){
     //PUSH INTO PRIORITY QUEUE: readyThreads;
     readyThreads.push(currentThread);
   }
-  if(currentThread->state == VM_THREAD_STATE_WAITING && currentThread->vmTick != 0){ 
-    //PUSH INTO SLEEPING QUEUE: sleepThreads;
-    sleepThreads.push_back(currentThread);
 
-  }
+  
 
   SMachineContextRef oldContext = NULL;
   for (unsigned int i = 0; i < threadList.size();i++){
     if(curThreadID == threadList[i]->id){
+      //cout << "Old context id: " << threadList[i]->id << endl;
       oldContext = &threadList[i]->context;
+      if(threadList[i]->id == readyThreads.top()->id){
+        readyThreads.pop();
+        //push idle thread back onto ready threads
+        if(threadList[i]->id == 2)
+          readyThreads.push(threadList[i]);
+      }
     }   
   }
 
@@ -85,9 +90,18 @@ void threadSchedule(){
   // if (readyThreads.empty()){
   // 	cout << "empty" << endl;
   // }
+  //cout << "readyThreads.top.id: " << readyThreads.top()->id << endl;
   SMachineContextRef newContext = &readyThreads.top()->context;
   curThreadID = readyThreads.top()->id;
+  //cout << "currentThread ID: " << currentThread->id << endl;
   currentThread->state = VM_THREAD_STATE_RUNNING;
+  //cout << "Current Thread ID popped from readyThreads: " << curThreadID << endl;
+  //if(!sleepThreads.empty()){
+    //cout << "Something is in sleeping queue." << endl;
+    //for(int i = 0; i < sleepThreads.size(); i++){
+    //  cout << i << " is in sleeping Queue" << endl;
+    //}
+  //}
   MachineContextSwitch(oldContext,newContext);
   readyThreads.pop();
 }
@@ -101,8 +115,7 @@ TCB* getTCB(TVMThreadID id){
 }
 
 void  callbackAlarm( void* t){
-	cout << "callback" << endl;
-	TIMER--;
+	//cout << "callback" << endl;
 	vector<TCB*>::iterator iter;
 
 	for(iter = sleepThreads.begin(); iter != sleepThreads.end();iter++){
@@ -127,7 +140,7 @@ TVMMainEntry VMLoadModule(const char *module);
 TVMStatus VMFilePrint(int filedescriptor, const char *format, ...);
 
 void idleThread(void*){
-	cout << "idlethread" << endl;
+	//cout << "idlethread" << endl;
 	MachineResumeSignals(&sigstate);
 	while(true);
 	MachineResumeSignals(&sigstate);
@@ -257,6 +270,9 @@ TVMStatus VMThreadDelete(TVMThreadID thread){
 }
 
 void threadWrapper(void* thread ){
+  cout << "Wrapper: " << ((TCB*)thread)->id << endl;
+  cout << "HELLO" << endl;
+  MachineEnableSignals();
 	((TCB*)thread)->entryCB(((TCB*)thread)->param);
 
 	VMThreadTerminate( ((TCB*)thread)->id);
@@ -370,11 +386,21 @@ TVMStatus VMThreadSleep(TVMTick tick){
 	}
 	else{
 	// put current thread to sleep
+    vector<TCB*>::iterator iter;
+    TCB* test = readyThreads.top();
+	  //for(iter = readyThreads.begin();iter != readyThreads.end();iter++){
+    //    if((*iter)->id == curThreadID){
+	//		    // delete thread
+	//		    readyThreads.erase(iter);
+   //     }
+    //}
+
 		TIMER = tick;
 		thread = getTCB(curThreadID);
 		thread->vmTick = tick;
 		thread->state = VM_THREAD_STATE_WAITING;
-		sleepThreads.push_back(thread);
+    sleepThreads.push_back(thread);
+	  threadSchedule();
 
 		//cout << "thread id: " << thread->id << endl;
 	
@@ -384,7 +410,6 @@ TVMStatus VMThreadSleep(TVMTick tick){
 		
 		
 	}
-	threadSchedule();
 
 	return VM_STATUS_SUCCESS;
 }
