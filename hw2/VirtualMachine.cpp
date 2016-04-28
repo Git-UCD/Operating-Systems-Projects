@@ -69,7 +69,7 @@ void threadSchedule(){
    for(unsigned int i = 0; i < threadList.size(); i++){
     if(curThreadID == threadList[i]->id){
       currentThread = threadList[i];
-      //cout << "currentThread ID: " << currentThread->id << endl;
+      cout << "currentThread ID: " << currentThread->id << endl;
     }   
   }
   // cout << "current id: " << currentThread->id <<  endl;
@@ -278,8 +278,6 @@ TVMStatus VMThreadDelete(TVMThreadID thread){
 }
 
 void threadWrapper(void* thread ){
-  cout << "Wrapper: " << ((TCB*)thread)->id << endl;
-  cout << "HELLO" << endl;
   MachineEnableSignals();
 	((TCB*)thread)->entryCB(((TCB*)thread)->param);
 
@@ -289,6 +287,13 @@ void threadWrapper(void* thread ){
 TVMStatus VMThreadActivate(TVMThreadID thread){
 	// cout << "Activate: " << thread << endl;
 	MachineSuspendSignals(&sigstate);
+  TCB* currentThread;
+   for(unsigned int i = 0; i < threadList.size(); i++){
+    if(curThreadID == threadList[i]->id){
+      currentThread = threadList[i];
+      cout << "currentThread ID: " << currentThread->id << endl;
+    }   
+  }
 
 	bool found = false;
 	// find  thread with matching id given
