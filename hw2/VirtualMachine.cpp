@@ -35,13 +35,24 @@ class TCB{
 	
 };
 
-vector<TCB*> threadList;
+class Mutex{
+	public:
+		TVMMutexID id;
+		bool locked;
 
+
+
+};
+
+
+ //Contains all thread create to lookup
+vector<TCB*> threadList;
 TVMThreadID curThreadID; // current operating thread
 TCB* curThread;
 
 
-
+//PRIORITY QUEUE SETUP
+//WILL RETURN HIGH PRIORITY > MED PRIORITY > LOW PRIORITY
 struct LessThanByPriority{
   bool operator()(const TCB* lhs, const TCB* rhs) const{
     return lhs->priority < rhs->priority;
@@ -186,8 +197,6 @@ TVMStatus VMStart(int tickms, int argc, char *argv[]){
     readyThreads.push(idleB);
     readyThreads.push(tstartBlk);
 
-
-
     mainEntry(argc,argv);
     MachineTerminate();
     return VM_STATUS_SUCCESS;
@@ -208,7 +217,6 @@ TVMStatus VMTickCount(TVMTickRef tickref){
 
 	return VM_STATUS_SUCCESS; 
 }
-
 
 
 TVMStatus VMThreadCreate(TVMThreadEntry entry, void *param, TVMMemorySize memsize, TVMThreadPriority prio, TVMThreadIDRef tid){
@@ -281,10 +289,8 @@ TVMStatus VMThreadActivate(TVMThreadID thread){
         	MachineContextCreate( mtContext, threadWrapper , threadList[i], stackaddr, threadList[i]->mmSize);
         	threadList[i]->context = *mtContext;
         	threadList[i]->state = VM_THREAD_STATE_READY;
-        	//curThreadID = threadList[i]->id;
     
         	readyThreads.push(threadList[i]);
-
 		}
 		
     }
@@ -389,6 +395,51 @@ TVMStatus VMThreadSleep(TVMTick tick){
 	return VM_STATUS_SUCCESS;
 }
 
+
+TVMStatus VMMutexCreate(TVMMutexIDRef mutexref){
+	if ( mutexref == NULL){
+		return VM_STATUS_ERROR_INVALID_PARAMETER;
+	}
+	// create mutex
+	//
+	return VM_STATUS_SUCCESS;
+}
+
+TVMStatus VMMutexDelete(TVMMutexID mutex){
+	bool found = false;
+
+	return VM_STATUS_SUCCESS;
+}
+
+TVMStatus VMMutexQuery(TVMMutexID mutex, TVMThreadIDRef ownerref){
+
+	if (ownerref == NULL){
+		return VM_STATUS_ERROR_INVALID_ID;
+	}
+
+	// find mutex
+
+	return VM_STATUS_SUCCESS;
+}
+
+TVMStatus VMMutexAcquire(TVMMutexID mutex, TVMTick timeout){
+	if (timeout == VM_TIMEOUT_IMMEDIATE){
+		//
+	}
+	else if ( timeout == VM_TIMEOUT_INFINITE){
+		//block
+	}
+	// else if () expire 
+
+	return VM_STATUS_SUCCESS;
+}
+
+TVMStatus VMMutexRelease(TVMMutexID mutex){
+	//
+
+	return VM_STATUS_SUCCESS;
+
+}
 
 
 
