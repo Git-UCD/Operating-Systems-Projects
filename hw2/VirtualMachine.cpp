@@ -65,7 +65,7 @@ TCB* getTCB(TVMThreadID id){
 void threadSchedule(){
   TCB* oldThread = currentThread;
 	//TCB* nextThread;
-  cout << "schedule " << endl;
+ // cout << "schedule " << endl;
   //cout << "current id: " << currentThread->id <<  endl;
   //cout << "readyThread: " << readyThreads.top()->id << endl;
  // cout << "size: " << readyThreads.size() << endl;
@@ -77,8 +77,8 @@ void threadSchedule(){
 	currentThread = readyThreads.top();
     currentThread->state = VM_THREAD_STATE_RUNNING;
     readyThreads.pop();
-    cout << "old thread id: " << oldThread->id << endl;
-    cout << "new thread id: " << currentThread->id << endl;
+   // cout << "old thread id: " << oldThread->id << endl;
+   // cout << "new thread id: " << currentThread->id << endl;
 
    // cout << "new id: " << currentThread->id << endl;
 	if (oldThread->id != currentThread->id){
@@ -95,41 +95,39 @@ void threadSchedule(){
 
 
 
-  cout <<  "finish schedule" << endl;
+ // cout <<  "finish schedule" << endl;
 
 }
 
 
 
 void idleThread(void*){
-	 cout << "idlethread" << endl;
+//	 cout << "idlethread" << endl;
 	MachineResumeSignals(&sigstate);
 	while(true);
 	MachineResumeSignals(&sigstate);
 }
 
 void  callbackAlarm( void* t){
-	 cout << "callback" << endl;
+//	 cout << "callback" << endl;
 	//TIMER--
-	for(vector<TCB*>::iterator iter = sleepThreads.begin(); iter != sleepThreads.end();iter++){
-        cout << "thread id: " <<  (*iter)->id << endl;
-	cout << "thread ticks: " << (*iter)->vmTick << endl;
-		if ( (*iter)->vmTick == 0){
-			cout << "timeout:" << endl;
-			(*iter)->state = VM_THREAD_STATE_READY;
-                        cout << "pushing " << (*iter)->id << endl; 
-			readyThreads.push(*iter);
-			sleepThreads.erase(iter);
+	for(unsigned int i = 0; i < sleepThreads.size();i++){
+		if ( sleepThreads[i]->vmTick == 0){
+		//	cout << "timeout:" << endl;
+			sleepThreads[i]->state = VM_THREAD_STATE_READY;
+                        //cout << "pushing " << (*iter)->id << endl; 
+			readyThreads.push(sleepThreads[i]);
+			sleepThreads.erase(sleepThreads.begin() + i);
 			threadSchedule();
 				
 		}	
-		(*iter)->vmTick--;
+		sleepThreads[i]->vmTick--;
 
 	}
 }
 
 TVMStatus VMThreadSleep(TVMTick tick){
- cout << "sleep thread " << endl;
+// cout << "sleep thread " << endl;
 	if (tick == VM_TIMEOUT_INFINITE){
 		return VM_STATUS_ERROR_INVALID_PARAMETER;
 	}
@@ -141,8 +139,8 @@ TVMStatus VMThreadSleep(TVMTick tick){
 	// put current thread to sleep
 		// TIMER = tick;
 		//thread = getTCB(curThreadID);
-	cout << "sleep thread: " <<  currentThread->id << endl;
-        cout << "sleep ticks: " << tick << endl;	
+//	cout << "sleep thread: " <<  currentThread->id << endl;
+//        cout << "sleep ticks: " << tick << endl;	
 		currentThread->vmTick = tick;
 		currentThread->state = VM_THREAD_STATE_WAITING;
 		sleepThreads.push_back(currentThread);
@@ -203,7 +201,7 @@ TVMStatus VMStart(int tickms, int argc, char *argv[]){
 }
 
 TVMStatus VMTickMS(int *tickmsref){
-cout << "tickms" << endl;
+//cout << "tickms" << endl;
 	if(tickmsref == NULL){
 		return VM_STATUS_ERROR_INVALID_PARAMETER;
 	}
@@ -281,7 +279,7 @@ TVMStatus VMThreadActivate(TVMThreadID thread){
         readyThreads.push(activateTCB);
 
          if ( (activateTCB->priority > currentThread->priority) || (currentThread->state == VM_THREAD_STATE_WAITING)){
-        	cout << "Activate schedule " << endl;
+  //      	cout << "Activate schedule " << endl;
          threadSchedule();
            }
         }
@@ -294,7 +292,7 @@ TVMStatus VMThreadActivate(TVMThreadID thread){
 }
 
 TVMStatus VMThreadTerminate(TVMThreadID thread){
-	cout << "terminate: " << thread << endl;
+//	cout << "terminate: " << thread << endl;
 	MachineSuspendSignals(&sigstate);
 	TCB* terminateTCB = getTCB(thread);
 	if (terminateTCB != NULL){
