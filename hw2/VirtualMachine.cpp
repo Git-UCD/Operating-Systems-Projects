@@ -259,7 +259,6 @@ TVMStatus VMThreadDelete(TVMThreadID thread){
 void threadWrapper(void* thread ){
        cout << "entry" << endl;
 	MachineSuspendSignals(&sigstate);
-
 	((TCB*)thread)->entryCB(((TCB*)thread)->param);
 	//cout << "ending" << endl;
 	VMThreadTerminate( ((TCB*)thread)->id);
@@ -271,21 +270,21 @@ TVMStatus VMThreadActivate(TVMThreadID thread){
 	MachineSuspendSignals(&sigstate);
 	TCB* activateTCB = getTCB(thread);
 	if (activateTCB != NULL){
-		if (activateTCB->state != VM_THREAD_STATE_DEAD ){
+		if (activateTCB->state != VM_THREAD_STATE_DEAD )
 			return VM_STATUS_ERROR_INVALID_STATE;
-		}
-		SMachineContextRef  mtContext  = new SMachineContext;
-		void* stackaddr = (void*)malloc(activateTCB->mmSize);
+        
+	SMachineContextRef  mtContext  = new SMachineContext;
+	void* stackaddr = (void*)malloc(activateTCB->mmSize);
         MachineContextCreate( mtContext, threadWrapper , activateTCB, stackaddr, activateTCB->mmSize);
         activateTCB->context = *mtContext;
         activateTCB->state = VM_THREAD_STATE_READY;
         readyThreads.push(activateTCB);
-        cout << "current state: " << currentThread->state << endl;
+
          if ( (activateTCB->priority > currentThread->priority) || (currentThread->state == VM_THREAD_STATE_WAITING)){
         	cout << "Activate schedule " << endl;
          threadSchedule();
            }
-	}
+        }
 	else{
 	  return VM_STATUS_ERROR_INVALID_ID;
 	}
