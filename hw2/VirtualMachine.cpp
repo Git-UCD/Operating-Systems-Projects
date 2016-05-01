@@ -17,9 +17,9 @@ static const int LOW = 1;
 TMachineSignalState sigstate;
 
 volatile int threadCount = 1;
+volatile int mutexCount = 1;
 TVMMainEntry VMLoadModule(const char *module);
 TVMStatus VMFilePrint(int filedescriptor, const char *format, ...);
-
 
 
 class TCB{
@@ -36,21 +36,45 @@ class TCB{
 	SMachineContext context;
 };
 
-vector<TCB*> threadList;
-
-TVMThreadID curThreadID; // current operating thread
-TCB* currentThread;
-
 struct LessThanByPriority{
   bool operator()(const TCB* lhs, const TCB* rhs) const{
     return lhs->priority < rhs->priority;
   }
 };
+
 typedef priority_queue<TCB*, vector<TCB*>, LessThanByPriority> pq;
+
+class Mutex{
+ public:
+      TVMMutexID id;
+      bool islocked;
+      TCB* owner;
+      
+      pq waiting; 
+      void nextOwner(){
+	owner = waiting.top();
+	waiting.pop();
+	}
+       
+};
+
+
+
+vector<TCB*> threadList;
+TCB* currentThread;
 
 
 pq readyThreads;
 vector<TCB*> sleepThreads;
+vector<Mutex*> mutexList;
+
+Mutex* getMutex(TVMMutexID mutexId){
+	for(unsigned int i = 0; i < mutexList.size(); i++ ){
+	    if ( mutexId == mutexList[i]->id )
+		return mutexList[i];
+	}
+	return NULL;
+}
 
 TCB* getTCB(TVMThreadID id){
 	for (unsigned int i = 0;i < threadList.size();i++){
@@ -82,7 +106,7 @@ void threadSchedule(){
 
    // cout << "new id: " << currentThread->id << endl;
 	if (oldThread->id != currentThread->id){
-		cout << "switch" << endl;
+	//	cout << "switch" << endl;
 		SMachineContextRef oldContext = &oldThread->context;
 		SMachineContextRef newContext = &currentThread->context; 
 		MachineContextSwitch(oldContext,newContext);
@@ -187,7 +211,6 @@ TVMStatus VMStart(int tickms, int argc, char *argv[]){
 
     threadList.push_back(tstartBlk);
     threadList.push_back(idleB);
-    curThreadID = tstartBlk->id;
     currentThread = tstartBlk;
 
     readyThreads.push(idleB);
@@ -255,7 +278,7 @@ TVMStatus VMThreadDelete(TVMThreadID thread){
 }
 
 void threadWrapper(void* thread ){
-       cout << "entry" << endl;
+       //cout << "entry" << endl;
 	MachineSuspendSignals(&sigstate);
 	((TCB*)thread)->entryCB(((TCB*)thread)->param);
 	//cout << "ending" << endl;
@@ -264,7 +287,7 @@ void threadWrapper(void* thread ){
 }
 
 TVMStatus VMThreadActivate(TVMThreadID thread){
-	cout << "Activate: " << thread << endl;
+	//cout << "Activate: " << thread << endl;
 	MachineSuspendSignals(&sigstate);
 	TCB* activateTCB = getTCB(thread);
 	if (activateTCB != NULL){
@@ -335,25 +358,112 @@ TVMStatus VMThreadState(TVMThreadID thread, TVMThreadStateRef stateref){
 }
 
 
+
+TVMStatus VMMutexCreate(TVMMutexIDRef mutexref){
+	if ( mutexref == NULL){
+		return VM_STATUS_ERROR_INVALID_PARAMETER;
+	}
+        Mutex* mutex =  new Mutex;
+        mutex->islocked = false;
+        mutex->id = mutexCount++;
+	*mutexref = mutex->id;
+	mutexList.push_back(mutex);
+	return VM_STATUS_SUCCESS;
+}
+
+TVMStatus VMMutexDelete(TVMMutexID mutex){
+	bool found = false;
+	for (unsigned int i = 0; i < mutexList.size();i++){
+	    if (mutexList[i]->id == mutex ){
+		//check if held by a thread
+		mutexList.erase(mutexList.begin() + i );
+		found = true;
+	   }	
+	}
+	if (!found)
+	return VM_STATUS_ERROR_INVALID_ID;
+	
+	
+
+	return VM_STATUS_SUCCESS;
+}
+
+
+TVMStatus VMMutexQuery(TVMMutexID mutex, TVMThreadIDRef ownerref){
+
+	if (ownerref == NULL){
+	   return VM_STATUS_ERROR_INVALID_PARAMETER;
+	}
+	// mutex 
+	Mutex* queryMutex = getMutex(mutex);
+	if (queryMutex == NULL){
+	   return VM_STATUS_ERROR_INVALID_ID;
+	}
+	if ( queryMutex->islocked ){
+	   return VM_THREAD_ID_INVALID;
+	}
+	else{
+	
+	*ownerref = queryMutex->owner->id;
+
+	} 
+
+	return VM_STATUS_SUCCESS;
+}
+
+
+TVMStatus VMMutexAcquire(TVMMutexID mutex, TVMTick timeout){
+	if (timeout == 0){
+	   return VM_STATUS_FAILURE;
+	}
+	Mutex* mutexAcquire = getMutex(mutex);
+
+	if (mutexAcquire == NULL ){
+	   return VM_STATUS_ERROR_INVALID_ID;
+	}
+	if (timeout == VM_TIMEOUT_IMMEDIATE){
+	   mutexAcquire->islocked = true;
+	   mutexAcquire->owner = currentThread;
+	   
+        }
+        else if (timeout == VM_TIMEOUT_INFINITE){
+	// block
+	}
+	return VM_STATUS_SUCCESS;
+}
+
+TVMStatus VMMutexRelease(TVMMutexID mutex){
+	Mutex* mutexRelease = getMutex(mutex);
+	if (mutexRelease == NULL ){
+           return VM_STATUS_ERROR_INVALID_ID;
+	}
+	if (mutexRelease->owner->id != currentThread->id ){
+	   return VM_STATUS_ERROR_INVALID_STATE;
+	}
+	mutexRelease->nextOwner();
+	
+	return VM_STATUS_SUCCESS;	
+}
+	
+
 volatile bool writeDone = false;
 void fileWCallback(void* thread,int result){
 //        cout << "ready id: " <<  ((TCB*)thread)->id << endl;
-//        readyThreads.push((TCB*)thread);
+        readyThreads.push((TCB*)thread);
 	writeDone = true;
-//       if ( ( (TCB*)thread)->priority > currentThread->priority )
-//        threadSchedule();
+       if ( ( (TCB*)thread)->priority > currentThread->priority )
+        threadSchedule();
 }
 
 TVMStatus VMFileWrite(int filedescriptor, void *data, int *length){
 //cout << "writing" << endl; 
-    TMachineFileCallback myfilecallback = fileWCallback;
-   
+    TMachineFileCallback myfilecallback = fileWCallback; 
     MachineFileWrite(filedescriptor, data, *length, myfilecallback, currentThread);
     // cout << "write: " << calldata << endl;
-    while(!writeDone);
+//    while(!writeDone);
 
-  // sleepThreads.push_back(currentThread);
-  // threadSchedule();
+   sleepThreads.push_back(currentThread);
+   threadSchedule();
 
     // }
 
