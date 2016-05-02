@@ -386,7 +386,7 @@ extern "C" {
   }
 
   TVMStatus VMMutexAcquire(TVMMutexID mutex, TVMTick timeout){
-    cout << "acquire" << endl;
+   // cout << "acquire" << endl;
     if (timeout == 0){
       return VM_STATUS_FAILURE;
     }
@@ -419,7 +419,7 @@ extern "C" {
     if (mutexRelease == NULL ){
       return VM_STATUS_ERROR_INVALID_ID;
     }
-    cout << "mutex release" << mutexRelease->owner->id << endl;
+   // cout << "mutex release" << mutexRelease->owner->id << endl;
     // if ( (mutexRelease->owner)->id != currentThread->id ){
     //   return VM_STATUS_ERROR_INVALID_STATE;
     // }
