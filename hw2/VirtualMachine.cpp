@@ -103,8 +103,8 @@ extern "C" {
       currentThread = readyThreads.top();
       currentThread->state = VM_THREAD_STATE_RUNNING;
       readyThreads.pop();
-      // cout << "old thread id: " << oldThread->id << endl;
-      // cout << "new thread id: " << currentThread->id << endl;
+      //cout << "old thread id: " << oldThread->id << endl;
+       //cout << "new thread id: " << currentThread->id << endl;
 
       // cout << "new id: " << currentThread->id << endl;
       if (oldThread->id != currentThread->id){
@@ -125,7 +125,6 @@ extern "C" {
   }
 
   void  callbackAlarm( void* t){
-    //cout << "alarm callback" << endl;
     for(unsigned int i = 0; i < sleepThreads.size();i++){
 //	cout << "ticks: " << sleepThreads[i]->vmTick << endl;
       if ( sleepThreads[i]->vmTick == 0){
@@ -141,7 +140,6 @@ extern "C" {
   }
 
   TVMStatus VMThreadSleep(TVMTick tick){
-  //   cout << "sleep thread " << endl;
     if (tick == VM_TIMEOUT_INFINITE){
       return VM_STATUS_ERROR_INVALID_PARAMETER;
     }
@@ -419,7 +417,6 @@ extern "C" {
     if (mutexRelease == NULL ){
       return VM_STATUS_ERROR_INVALID_ID;
     }
-   // cout << "mutex release" << mutexRelease->owner->id << endl;
     // if ( (mutexRelease->owner)->id != currentThread->id ){
     //   return VM_STATUS_ERROR_INVALID_STATE;
     // }
@@ -430,22 +427,26 @@ extern "C" {
 
   volatile bool writeDone = false;
   void fileWCallback(void* thread,int result){
+   MachineSuspendSignals(&sigstate);
     readyThreads.push((TCB*)thread);
     if ( ( (TCB*)thread)->priority > currentThread->priority )
       threadSchedule();
+    MachineResumeSignals(&sigstate);
+
   }
 
   TVMStatus VMFileWrite(int filedescriptor, void *data, int *length){
-       MachineSuspendSignals(&sigstate);
-       TMachineFileCallback myfilecallback = fileWCallback; 
-       MachineFileWrite(filedescriptor, data, *length, myfilecallback, currentThread);
+     MachineSuspendSignals(&sigstate);
+    //cout << "writing" << endl; 
+    TMachineFileCallback myfilecallback = fileWCallback; 
+    MachineFileWrite(filedescriptor, data, *length, myfilecallback, currentThread);
+    // cout << "write: " << calldata << endl;
+       //while(!writeDone);
        currentThread->state = VM_THREAD_STATE_WAITING;
-  //     sleepThreads.push_back(currentThread);
        threadSchedule();
-      //  while(!writeDone);
-    
-    MachineResumeSignals(&sigstate);
 
+    // }
+      MachineResumeSignals(&sigstate);
 
     return VM_STATUS_SUCCESS;
 }
