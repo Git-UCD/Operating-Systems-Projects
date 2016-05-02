@@ -9,6 +9,7 @@
 
 using namespace std;
 extern "C" {
+    #define VM_THREAD_PRIORITY_IDLE                 ((TVMThreadPriority)0x00)
 
   volatile int TIMER;
   static const int HIGH = 3;
@@ -34,6 +35,7 @@ extern "C" {
       TVMThreadEntry entryCB;
       void* param;
       SMachineContext context;
+      int result;
   };
 
   struct LessThanByPriority{
@@ -116,17 +118,20 @@ extern "C" {
   }
 
   void idleThread(void*){
+   // cout << "idle" << endl;
     MachineResumeSignals(&sigstate);
     while(true);
     MachineResumeSignals(&sigstate);
   }
 
   void  callbackAlarm( void* t){
+    //cout << "alarm callback" << endl;
     for(unsigned int i = 0; i < sleepThreads.size();i++){
+//	cout << "ticks: " << sleepThreads[i]->vmTick << endl;
       if ( sleepThreads[i]->vmTick == 0){
         //	cout << "timeout:" << endl;
         sleepThreads[i]->state = VM_THREAD_STATE_READY;
-        //cout << "pushing " << (*iter)->id << endl; 
+        //cout << "pushing " << sleepThreads[i]->id << endl; 
         readyThreads.push(sleepThreads[i]);
         sleepThreads.erase(sleepThreads.begin() + i);
         threadSchedule();
@@ -136,7 +141,7 @@ extern "C" {
   }
 
   TVMStatus VMThreadSleep(TVMTick tick){
-    // cout << "sleep thread " << endl;
+  //   cout << "sleep thread " << endl;
     if (tick == VM_TIMEOUT_INFINITE){
       return VM_STATUS_ERROR_INVALID_PARAMETER;
     }
@@ -176,7 +181,7 @@ extern "C" {
     // idle thread
     TCB *idleB = new TCB;
     idleB->entryCB = idleThread;
-    idleB->priority = VM_THREAD_PRIORITY_LOW;
+    idleB->priority = VM_THREAD_PRIORITY_IDLE;
     idleB->state = VM_THREAD_STATE_READY;
     idleB->mmSize = 0x10000;
     idleB->vmTick = 0;
@@ -186,7 +191,7 @@ extern "C" {
     MachineContextCreate( idleContext, idleB->entryCB , idleB, stackaddr, idleB->mmSize);
     idleB ->context = *idleContext;
 
-    threadList.push_back(tstartBlk);
+    //threadList.push_back(tstartBlk);
     threadList.push_back(idleB);
     currentThread = tstartBlk;
 
@@ -250,7 +255,7 @@ extern "C" {
   }
 
   void threadWrapper(void* thread ){
-    //cout << "entry" << endl;
+   // cout << "entry" << endl;
     MachineSuspendSignals(&sigstate);
     ((TCB*)thread)->entryCB(((TCB*)thread)->param);
     //cout << "ending" << endl;
@@ -329,6 +334,7 @@ extern "C" {
   }
 
   TVMStatus VMMutexCreate(TVMMutexIDRef mutexref){
+   // cout << "create mutex" << endl;
     if ( mutexref == NULL){
       return VM_STATUS_ERROR_INVALID_PARAMETER;
     }
@@ -380,6 +386,7 @@ extern "C" {
   }
 
   TVMStatus VMMutexAcquire(TVMMutexID mutex, TVMTick timeout){
+    cout << "acquire" << endl;
     if (timeout == 0){
       return VM_STATUS_FAILURE;
     }
@@ -389,12 +396,20 @@ extern "C" {
       return VM_STATUS_ERROR_INVALID_ID;
     }
     if (timeout == VM_TIMEOUT_IMMEDIATE){
-      mutexAcquire->islocked = true;
-      mutexAcquire->owner = currentThread;
+      if (!mutexAcquire->islocked){
+        mutexAcquire->islocked = true;
+        mutexAcquire->owner = currentThread;
+        return VM_STATUS_SUCCESS;
+      }
+      else{
+        return VM_STATUS_FAILURE;
+      }
 
     }
     else if (timeout == VM_TIMEOUT_INFINITE){
       // block
+      currentThread->state = VM_THREAD_STATE_WAITING;
+      mutexAcquire->waiting.push(currentThread);
     }
     return VM_STATUS_SUCCESS;
   }
@@ -404,108 +419,109 @@ extern "C" {
     if (mutexRelease == NULL ){
       return VM_STATUS_ERROR_INVALID_ID;
     }
-    if (mutexRelease->owner->id != currentThread->id ){
-      return VM_STATUS_ERROR_INVALID_STATE;
-    }
-    mutexRelease->nextOwner();
+    cout << "mutex release" << mutexRelease->owner->id << endl;
+    // if ( (mutexRelease->owner)->id != currentThread->id ){
+    //   return VM_STATUS_ERROR_INVALID_STATE;
+    // }
+    // mutexRelease->nextOwner();
 
     return VM_STATUS_SUCCESS;	
   }
 
   volatile bool writeDone = false;
   void fileWCallback(void* thread,int result){
-    //        cout << "ready id: " <<  ((TCB*)thread)->id << endl;
     readyThreads.push((TCB*)thread);
-    writeDone = true;
     if ( ( (TCB*)thread)->priority > currentThread->priority )
       threadSchedule();
   }
 
   TVMStatus VMFileWrite(int filedescriptor, void *data, int *length){
-    //cout << "writing" << endl; 
-    TMachineFileCallback myfilecallback = fileWCallback; 
-    MachineFileWrite(filedescriptor, data, *length, myfilecallback, currentThread);
-    // cout << "write: " << calldata << endl;
-    //    while(!writeDone);
-
-    sleepThreads.push_back(currentThread);
-    threadSchedule();
-
-    // }
+       MachineSuspendSignals(&sigstate);
+       TMachineFileCallback myfilecallback = fileWCallback; 
+       MachineFileWrite(filedescriptor, data, *length, myfilecallback, currentThread);
+       currentThread->state = VM_THREAD_STATE_WAITING;
+  //     sleepThreads.push_back(currentThread);
+       threadSchedule();
+      //  while(!writeDone);
+    
+    MachineResumeSignals(&sigstate);
 
 
     return VM_STATUS_SUCCESS;
 }
 
-volatile bool openDone = false; 
-int fd;
-void fileOpenCallback(void* calldata, int result){
-  cout << "CB:" << result << endl;
-  fd = result;
-
-  openDone = true;
+void fileOpenCallback(void* thread , int result){
+MachineSuspendSignals(&sigstate);
+// when done we switch back 
+  ((TCB*)thread)->result = result;
+  readyThreads.push( (TCB*)thread);
+  if ( ( (TCB*)thread)->priority > currentThread->priority )
+    threadSchedule();
+MachineResumeSignals(&sigstate);
 }
 
 TVMStatus VMFileOpen(const char *filename, int flags, int mode, int *filedescriptor){
+ MachineSuspendSignals(&sigstate);
   TMachineFileCallback fOpenCallback = fileOpenCallback;
-
-  MachineFileOpen(filename, flags,  mode, fOpenCallback, NULL);
-  while(!openDone);
-  *filedescriptor = fd;
-  cout << "fileopen:" <<  fd << endl;
-
-
+  MachineFileOpen(filename, flags,  mode, fOpenCallback, currentThread);
+  currentThread->state = VM_THREAD_STATE_WAITING;
+  threadSchedule();
+  *filedescriptor = currentThread->result; 
+ MachineResumeSignals(&sigstate);
   return VM_STATUS_SUCCESS;
-
 }
 
-volatile bool closeDone = false;
-void fileCloseCallback(void* calldata,int result){
-  closeDone = true;
+
+void fileCloseCallback(void* thread ,int result){
+  readyThreads.push( (TCB*)thread);
+  if ( ( (TCB*)thread)->priority > currentThread->priority )
+    threadSchedule();
 }
 TVMStatus VMFileClose(int filedescriptor){
+MachineSuspendSignals(&sigstate);
   TMachineFileCallback fCloseCallback = fileCloseCallback;
-
-  MachineFileClose(filedescriptor, fCloseCallback, NULL);
-  while(!closeDone);
+  MachineFileClose(filedescriptor, fCloseCallback, currentThread);
+  currentThread->state = VM_THREAD_STATE_WAITING;
+  threadSchedule();
+  //while(!closeDone);
+MachineResumeSignals(&sigstate);
   return VM_STATUS_SUCCESS;
 }  
 
-volatile bool seekdone = false;
-int offset;
-void fileSeekCallback(void* calldata,int result){
-  cout << "seek:" << result << endl;
-  offset = result;
-  seekdone = true;
+void fileSeekCallback(void* thread ,int result){
+    readyThreads.push( (TCB*)thread);
+    ((TCB*)thread)->result = result;
+  if ( ( (TCB*)thread)->priority > currentThread->priority )
+    threadSchedule();
 }
 
 TVMStatus VMFileSeek(int filedescriptor, int offset, int whence, int *newoffset){
+MachineSuspendSignals(&sigstate);
   TMachineFileCallback fSeekCallback = fileSeekCallback;
+  MachineFileSeek( filedescriptor, offset, whence, fSeekCallback, currentThread);
+  threadSchedule();
+  *newoffset = currentThread->result;
 
-  MachineFileSeek( filedescriptor, offset, whence, fSeekCallback, NULL);
-  while(!seekdone);
-  *newoffset = offset;
-
-
+MachineResumeSignals(&sigstate);
   return VM_STATUS_SUCCESS;
 }
-
-volatile bool readDone = false;
-int readsize; 
-void fileReadCallback(void* calldata,int result){
-
-  readsize = result;
-  readDone = true;
+ 
+void fileReadCallback(void* thread ,int result){
+   ((TCB*)thread)->result = result;
+   readyThreads.push( (TCB*)thread);
+  if ( ( (TCB*)thread)->priority > currentThread->priority )
+    threadSchedule();
 }
 
 
 TVMStatus VMFileRead(int filedescriptor, void *data, int *length){
+  MachineSuspendSignals(&sigstate);
   TMachineFileCallback fReadCallback = fileReadCallback;
-
-  MachineFileRead(filedescriptor, data, *length, fReadCallback, NULL);
-  while(!readDone);
-  *length = readsize;
-
+  MachineFileRead(filedescriptor, data, *length, fReadCallback, currentThread);
+  currentThread->state = VM_THREAD_STATE_WAITING;
+  threadSchedule();
+  *length = currentThread->result;
+   MachineResumeSignals(&sigstate);
   return VM_STATUS_SUCCESS;
 }
 
