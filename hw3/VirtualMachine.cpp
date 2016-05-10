@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <iterator>
 #include <string>
+#include <string.h>
 
 using namespace std;
 extern "C" {
@@ -16,6 +17,7 @@ extern "C" {
   static const int MED = 2;
   static const int LOW = 1;
   TMachineSignalState sigstate;
+  void* DATA;
 
   volatile int threadCount = 1;
   volatile int mutexCount = 1;
@@ -163,6 +165,7 @@ extern "C" {
     }
     //else
     //create memory in memorypools
+    return VM_STATUS_SUCCESS;
   }
   
   //deletes a memory pool that has no memory allocated from the pool, memory pool is specified by memory parameter
@@ -176,7 +179,7 @@ extern "C" {
     //return VM_STATUS_ERROR_INVALID_STATE;
     //else
     // DELETE MEMORY POOL
-    // return VM_STATUS_SUCCESS;
+    return VM_STATUS_SUCCESS;
   }
 
   //query a memory pool for the available memory left
@@ -186,20 +189,29 @@ extern "C" {
     //if 'memory' is not a valid memory pool or bytesleft is NULL
     //return VM_STATUS_ERROR_INVALID_PARAMETER;
     //upon successful querying of the memory pool
-    //return VM_STATUS_SUCCESS;
+    return VM_STATUS_SUCCESS;
   }
   
   //the memory pool to allocate is specified by the memory parameter
   //size is allocated by the size and the base of the allocated array specified by the pointer
   //the allocated size will be rounded to the next multiple of 64bytes that is greater than or equal to the size parameter
   TVMStatus VMMemoryPoolAllocate(TVMMemoryPoolID memory, TVMMemorySize size, void **pointer){
-
+    if(memory == NULL || size == 0 || pointer == NULL){
+      return VM_STATUS_ERROR_INVALID_PARAMETER;
+    }
+    //if memory pool does not have sufficient memory to allocate array of size bytes
+    //return VM_STATUS_ERROR_INSUFFICIENT_RESOURCES;
     }
 
   //the memory pool to deallocate is specified by the memory parameter
   //the base of the previously allocated array is specified by pointer
   TVMStatus VMMemoryPoolDeallocate(TVMMemoryPoolID memory, void *pointer){
-    
+    if(pointer == NULL){
+      return VM_STATUS_ERROR_INVALID_PARAMETER;
+    }
+//     If pointer does not specify a memory location that was previously allocated
+// from the memory pool, VM_STATUS_ERROR_INVALID_PARAMETER
+    return VM_STATUS_SUCCESS;
   }
 
   //MachineInitialize(size_t sharesize);
@@ -208,22 +220,22 @@ extern "C" {
 
   //MachineFileRead
   //void
-  MachineFileRead(
-  int
-  fd, 
-  void
-  *data, 
-  int
-  length, 
-  TMachineFileCallback callback, 
-  void
-  *calldata);
+  // MachineFileRead(
+  // int
+  // fd, 
+  // void
+  // *data, 
+  // int
+  // length, 
+  // TMachineFileCallback callback, 
+  // void
+  // *calldata);
   
   // heapsize of the virtual machine is specified by heapsize
   // the heap is accessed by the applications through the VM_MEMORY_POOL_ID_SYSTEM memory pool
   // the size of shared memory space between the virtual machine and the machine is specified by the sharedsize
   TVMStatus VMStart(int tickms, TVMMemorySize heapsize, TVMMemorySize sharedsize, int argc, char *argv[]){
-    MachineInitialize();
+    DATA = MachineInitialize(sharedsize);
     // request time
     TVMMainEntry mainEntry =  VMLoadModule(argv[0]);
     if(mainEntry == NULL){
@@ -480,7 +492,8 @@ extern "C" {
   TVMStatus VMFileWrite(int filedescriptor, void *data, int *length){
     MachineSuspendSignals(&sigstate);
     TMachineFileCallback myfilecallback = fileWCallback; 
-    MachineFileWrite(filedescriptor, data, *length, myfilecallback, currentThread);
+    memcpy(DATA,data,*length);
+    MachineFileWrite(filedescriptor, DATA, *length, myfilecallback, currentThread);
     currentThread->state = VM_THREAD_STATE_WAITING;
     threadSchedule();
     MachineResumeSignals(&sigstate);
