@@ -7,6 +7,7 @@
 #include <iterator>
 #include <string>
 #include <string.h>
+#include <list>
 
 using namespace std;
 extern "C" {
@@ -17,10 +18,15 @@ extern "C" {
   static const int MED = 2;
   static const int LOW = 1;
   TMachineSignalState sigstate;
-  void* DATA;
+  extern const TVMMemoryPoolID VM_MEMORY_POOL_ID_SYSTEM = 1;
+
+
+  void* dataPtr;
+ 
 
   volatile int threadCount = 1;
   volatile int mutexCount = 1;
+  volatile int poolCount = 1;
   TVMMainEntry VMLoadModule(const char *module);
   TVMStatus VMFilePrint(int filedescriptor, const char *format, ...);
 
@@ -61,12 +67,38 @@ extern "C" {
 
   };
 
+  class MemPool{
+  public:
+    TVMMemoryPoolID id;
+    void* basePtr;
+    size_t memSize;
+    size_t bytesleft;
+  };
+
+
+  // memory pools
+  list<MemPool*> memPools;
+
+ 
+
+
+  // threads
   vector<TCB*> threadList;
   TCB* currentThread;
 
   pq readyThreads;
   vector<TCB*> sleepThreads;
   vector<Mutex*> mutexList;
+
+  MemPool* getMemPool(TVMMemoryPoolID id ){
+    list<MemPool*>::iterator iter;
+    for(iter = memPools.begin(); iter != memPools.end();iter++){
+      if( id == (*iter)->id){
+        return *iter;
+      }
+    }
+    return NULL;
+  }
 
   Mutex* getMutex(TVMMutexID mutexId){
     for(unsigned int i = 0; i < mutexList.size(); i++ ){
@@ -164,6 +196,15 @@ extern "C" {
       return VM_STATUS_ERROR_INVALID_PARAMETER;
     }
     //else
+    MemPool* pool = new MemPool;
+    pool->memSize = size;
+    pool->id = poolCount++;
+    pool->basePtr = base;
+    *memory = pool->id; 
+    memPools.push_back(pool);
+
+
+
     //create memory in memorypools
     return VM_STATUS_SUCCESS;
   }
@@ -188,6 +229,12 @@ extern "C" {
   TVMStatus VMMemoryPoolQuery(TVMMemoryPoolID memory, TVMMemorySizeRef bytesleft){
     //if 'memory' is not a valid memory pool or bytesleft is NULL
     //return VM_STATUS_ERROR_INVALID_PARAMETER;
+    MemPool* queryPool = getMemPool(memory);
+    if(queryPool == NULL|| queryPool->bytesleft == NULL){
+      return VM_STATUS_ERROR_INVALID_PARAMETER;
+    }
+    *bytesleft = queryPool->bytesleft;
+    
     //upon successful querying of the memory pool
     return VM_STATUS_SUCCESS;
   }
@@ -235,14 +282,25 @@ extern "C" {
   // the heap is accessed by the applications through the VM_MEMORY_POOL_ID_SYSTEM memory pool
   // the size of shared memory space between the virtual machine and the machine is specified by the sharedsize
   TVMStatus VMStart(int tickms, TVMMemorySize heapsize, TVMMemorySize sharedsize, int argc, char *argv[]){
-    DATA = MachineInitialize(sharedsize);
+    dataPtr = MachineInitialize(sharedsize);
     // request time
     TVMMainEntry mainEntry =  VMLoadModule(argv[0]);
     if(mainEntry == NULL){
       return VM_STATUS_FAILURE;
     }
+    
     TMachineAlarmCallback callback = callbackAlarm;
     MachineRequestAlarm(tickms*1000,callback,NULL);
+
+    // allocate system memory
+    void* systemMemory = (void*)malloc(heapsize);
+    MemPool* sysMM = new MemPool;
+    sysMM->memSize = heapsize;
+    // VM_MEMORY_POOL_ID_SYSTEM
+    // sysMM->id = VM_MEMORY_POOL_ID_SYSTEM;
+    sysMM->basePtr = systemMemory;
+
+
     // setup information for the main and idle thread
     //main thread
     TCB* tstartBlk = new TCB;
@@ -271,7 +329,10 @@ extern "C" {
     readyThreads.push(idleB);
     mainEntry(argc,argv);
 
+    
+
     MachineTerminate();
+   
     return VM_STATUS_SUCCESS;
   }
 
@@ -492,8 +553,8 @@ extern "C" {
   TVMStatus VMFileWrite(int filedescriptor, void *data, int *length){
     MachineSuspendSignals(&sigstate);
     TMachineFileCallback myfilecallback = fileWCallback; 
-    memcpy(DATA,data,*length);
-    MachineFileWrite(filedescriptor, DATA, *length, myfilecallback, currentThread);
+    memcpy(dataPtr,data,*length);
+    MachineFileWrite(filedescriptor, dataPtr, *length, myfilecallback, currentThread);
     currentThread->state = VM_THREAD_STATE_WAITING;
     threadSchedule();
     MachineResumeSignals(&sigstate);
@@ -563,11 +624,13 @@ extern "C" {
 
   TVMStatus VMFileRead(int filedescriptor, void *data, int *length){
     MachineSuspendSignals(&sigstate);
+
     TMachineFileCallback fReadCallback = fileReadCallback;
-    MachineFileRead(filedescriptor, data, *length, fReadCallback, currentThread);
+    MachineFileRead(filedescriptor, dataPtr , *length, fReadCallback, currentThread);
     currentThread->state = VM_THREAD_STATE_WAITING;
     threadSchedule();
     *length = currentThread->result;
+    memcpy(data,dataPtr,*length);
     MachineResumeSignals(&sigstate);
     return VM_STATUS_SUCCESS;
   }
