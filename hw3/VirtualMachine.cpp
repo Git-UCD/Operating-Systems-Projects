@@ -68,10 +68,10 @@ extern "C" {
 
   };
 
-  class MemoryChuck{
+  class MemoryChunk{
   public:
     void* beginPtr;
-    size_t length;
+    unsigned int chunkSize;
     bool spaceFree;
     unsigned int id;
   };
@@ -82,11 +82,17 @@ extern "C" {
     TVMMemoryPoolID id;
     void* basePtr;
     size_t memSize;
-    size_t bytesleft;
-    vector<MemoryChuck*> memorySpaces; 
-    void poolManager(){};
+    unsigned int  bytesleft;
+    vector<MemoryChunk*> memorySpaces; 
+    void poolManager(){
+      for(unsigned int i = 0;i < memorySpaces.size();i++){
+         if((memorySpaces[i])->spaceFree == true){
+           //group memory
+           bytesleft += memorySpaces[i]->chunkSize; 
+         }     
+      }
     // MemPool(){
-    // }
+    }
 
   };
 
@@ -269,6 +275,31 @@ extern "C" {
     if(memory == NULL || size == 0 || pointer == NULL){
       return VM_STATUS_ERROR_INVALID_PARAMETER;
     }
+    int unitSize = 64;
+    int sizeAdjust =( (size + unitSize-1)/unitSize)*unitSize;
+    MemPool * allocatePool = getMemPool(memory);
+    
+    vector<MemoryChunk*>::iterator iter = (allocatePool->memorySpaces).begin();
+    // find first available free memory size fit 
+    for(iter;iter != (allocatePool->memorySpaces).begin();iter++){
+       if ( (*iter)->chunkSize >= sizeAdjust){
+         //  (*iter)->spaceFree = false
+           if(!(*iter)->spaceFree){
+              MemoryChunk * newChunk = new MemoryChunk;
+              newChunk->chunkSize = sizeAdjust;
+              newChunk->spaceFree = false;
+             // taking a cut from memory chunk found
+             (*iter)->chunkSize -= sizeAdjust;
+             uint8_t* ptr = (uint8_t*)(*iter)-> beginPtr + sizeAdjust;
+             newChunk->beginPtr = ptr;
+             (allocatePool->memorySpaces).push_back(newChunk);
+              }
+	      break;
+           }
+           
+       }
+          
+    
     //if memory pool does not have sufficient memory to allocate array of size bytes
     //return VM_STATUS_ERROR_INSUFFICIENT_RESOURCES;
     }
