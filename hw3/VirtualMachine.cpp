@@ -18,6 +18,7 @@ extern "C" {
   static const int MED = 2;
   static const int LOW = 1;
   TMachineSignalState sigstate;
+
   extern const TVMMemoryPoolID VM_MEMORY_POOL_ID_SYSTEM = 1;
 
 
@@ -67,13 +68,29 @@ extern "C" {
 
   };
 
+  class MemoryChuck{
+  public:
+    void* beginPtr;
+    size_t length;
+    bool spaceFree;
+    unsigned int id;
+  };
+
   class MemPool{
   public:
+    static  int counterChunks;
     TVMMemoryPoolID id;
     void* basePtr;
     size_t memSize;
     size_t bytesleft;
+    vector<MemoryChuck*> memorySpaces; 
+    void poolManager(){};
+    // MemPool(){
+    // }
+
   };
+
+
 
 
   // memory pools
@@ -201,6 +218,12 @@ extern "C" {
     pool->id = poolCount++;
     pool->basePtr = base;
     *memory = pool->id; 
+    //setup the memory chuck
+    // MemoryChuck* firstChuck = new MemoryChuck;
+    // firstChuck->length = size;
+    // firstChuck->beginPtr = base;
+    // firstChuck->spaceFree = true;
+    // (pool->memorySpaces).push_back(firstChuck);
     memPools.push_back(pool);
 
 
@@ -297,7 +320,7 @@ extern "C" {
     MemPool* sysMM = new MemPool;
     sysMM->memSize = heapsize;
     // VM_MEMORY_POOL_ID_SYSTEM
-    // sysMM->id = VM_MEMORY_POOL_ID_SYSTEM;
+    sysMM->id = VM_MEMORY_POOL_ID_SYSTEM;
     sysMM->basePtr = systemMemory;
 
 
