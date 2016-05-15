@@ -124,7 +124,7 @@ extern "C" {
   vector<Mutex*> mutexList;
 
   MemPool* getMemPool(TVMMemoryPoolID id ){
-    cout << "get pool" << endl;
+   // cout << "get pool" << endl;
     list<MemPool*>::iterator iter;
     for(iter = memPools.begin(); iter != memPools.end();iter++){
       if( id == (*iter)->id){
@@ -236,11 +236,11 @@ extern "C" {
     pool->basePtr = base;
     *memory = pool->id; 
     //setup the memory chuck
-    // MemoryChuck* firstChuck = new MemoryChuck;
-    // firstChuck->length = size;
-    // firstChuck->beginPtr = base;
-    // firstChuck->spaceFree = true;
-    // (pool->memorySpaces).push_back(firstChuck);
+     MemoryChunk* firstChunk = new MemoryChunk;
+     firstChunk->chunkSize = size;
+     firstChunk->beginPtr = base;
+     firstChunk->spaceFree = true;
+     (pool->memorySpaces).push_back(firstChunk);
     memPools.push_back(pool);
 
 
@@ -267,13 +267,14 @@ extern "C" {
   //the memory pool id is 'memory'
   //the space left unallocated in the memory pool is placed inside bytesleft
   TVMStatus VMMemoryPoolQuery(TVMMemoryPoolID memory, TVMMemorySizeRef bytesleft){
-   cout << "query" << endl;
+  // cout << "query" << endl;
     //if 'memory' is not a valid memory pool or bytesleft is NULL
     //return VM_STATUS_ERROR_INVALID_PARAMETER;
     MemPool* queryPool = getMemPool(memory);
-    if(queryPool == NULL|| queryPool->bytesleft == NULL){
+    if(queryPool == NULL){
       return VM_STATUS_ERROR_INVALID_PARAMETER;
     }
+  //  queryPool->poolManager();
     *bytesleft = queryPool->bytesleft;
     
     //upon successful querying of the memory pool
@@ -284,31 +285,29 @@ extern "C" {
   //size is allocated by the size and the base of the allocated array specified by the pointer
   //the allocated size will be rounded to the next multiple of 64bytes that is greater than or equal to the size parameter
   TVMStatus VMMemoryPoolAllocate(TVMMemoryPoolID memory, TVMMemorySize size, void **pointer){
-    cout << "memory" << endl;
+   
     
     if(memory == NULL || size == 0){
-      cout << "pointer" << endl;
+ 
       return VM_STATUS_ERROR_INVALID_PARAMETER;
     }
-    cout << "allocating" << endl;
+   
     int unitSize = 64;
     int sizeAdjust =( (size + unitSize-1)/unitSize)*unitSize;
     MemPool * allocatePool = getMemPool(memory);
     if(allocatePool == NULL){
-        cout << "NULL" << endl;
  	return VM_STATUS_ERROR_INVALID_PARAMETER;
    }
  
     bool foundSpace = false;
     vector<MemoryChunk*>::iterator iter;// = (allocatePool->memorySpaces).begin();
     // find first available free memory size fit 
-    cout << "allocate" << endl;
+   
     for(iter=(allocatePool->memorySpaces).begin();iter != (allocatePool->memorySpaces).end();iter++){
-
-      cout << "searching " << endl;
-       if ( (*iter)->chunkSize >= sizeAdjust){
-         //  (*iter)->spaceFree = false
-           if( (*iter)->spaceFree){
+       if ( (*iter)->chunkSize >= sizeAdjust && (*iter)->spaceFree){
+              
+           
+            //  cout << "found" << endl;
               foundSpace = true;
               MemoryChunk * newChunk = new MemoryChunk;
               newChunk->chunkSize = sizeAdjust;
@@ -319,11 +318,12 @@ extern "C" {
              newChunk->beginPtr = ptr;
              *pointer = newChunk->beginPtr;
              (allocatePool->memorySpaces).push_back(newChunk);
-              }
-	      break;
-           }
+             break;
+          }
+	      
+        }
            
-       }
+       
     if(!foundSpace){
        return VM_STATUS_ERROR_INSUFFICIENT_RESOURCES;
     }
@@ -388,6 +388,8 @@ extern "C" {
     sysMM->memSize = heapsize;
     // VM_MEMORY_POOL_ID_SYSTEM
     sysMM->id = VM_MEMORY_POOL_ID_SYSTEM;
+    // increamenting id 
+    poolCount++;
     sysMM->basePtr = systemMemory;
     MemoryChunk * systemChunk = new MemoryChunk;
     systemChunk->chunkSize = heapsize;
