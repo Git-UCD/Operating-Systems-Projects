@@ -67,7 +67,7 @@ extern "C" {
 
   class MemoryChunk{
     public:
-      void* beginPtr;
+      uint8_t *beginPtr;
       unsigned int size;
       bool free;
   };
@@ -75,7 +75,7 @@ extern "C" {
   class MemPool{
     public:
       TVMMemoryPoolID id;
-      void* basePtr;
+      uint8_t *basePtr;
       size_t memSize;
       size_t bytesLeft;
       vector<MemoryChunk*> *array;
@@ -170,7 +170,18 @@ extern "C" {
     }
     //if memory pool does not have sufficient memory to allocate array of size bytes
     //return VM_STATUS_ERROR_INSUFFICIENT_RESOURCES;
+    MemPool* memoryPool = getMemPool(memory);
+    memoryPool->freeSpace();
+    cout << "SPACE LEFT: " << memoryPool->bytesLeft << endl;
+    if(memoryPool->bytesLeft < size){
+      //return error
+    }
+    else{
+      //allocate memory
+
+    }
   }
+  
 
   //the memory pool to deallocate is specified by the memory parameter
   //the base of the previously allocated array is specified by pointer
@@ -310,8 +321,21 @@ extern "C" {
     sysMM->memSize = heapsize;
     sysMM->id = VM_MEMORY_POOL_ID_SYSTEM;
     // allocate base of memory
-    void* systemMemory = (void*)malloc(heapsize);
+    uint8_t *systemMemory = (uint8_t*)malloc(heapsize);
     sysMM->basePtr = systemMemory;
+    cout << "Initial size: " << heapsize << endl;
+    int length = ((heapsize+63)/64) * 64;
+    int vectorsNeeded = length / 64;
+    cout << "Vectors needed: " << vectorsNeeded << endl;
+    sysMM->array = new vector<MemoryChunk*>(vectorsNeeded);
+    cout << "i < " << sysMM->array->size() << endl;
+    for(int i = 0; i < sysMM->array->size(); i++){
+      (*sysMM->array)[i] = new MemoryChunk;
+      (*sysMM->array)[i]->size = 64;
+      (*sysMM->array)[i]->free = 1;
+      (*sysMM->array)[i]->beginPtr = (sysMM->basePtr) + (64*i);
+    }
+    cout << "Never gets to this point." << endl;
     memPools.push_back(sysMM);
     cout << "sysMM id: " << sysMM->id << " and size: " << sysMM->memSize << endl;
 
