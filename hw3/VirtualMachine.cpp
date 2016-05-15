@@ -20,9 +20,7 @@ extern "C" {
   TMachineSignalState sigstate;
   extern const TVMMemoryPoolID VM_MEMORY_POOL_ID_SYSTEM = 1;
 
-
   void* dataPtr;
- 
 
   volatile int threadCount = 1;
   volatile int mutexCount = 1;
@@ -67,19 +65,38 @@ extern "C" {
 
   };
 
+  class MemoryChunk{
+    public:
+      void* beginPtr;
+      unsigned int size;
+      bool free;
+  };
+
   class MemPool{
-  public:
-    TVMMemoryPoolID id;
-    void* basePtr;
-    size_t memSize;
-    size_t bytesleft;
+    public:
+      TVMMemoryPoolID id;
+      void* basePtr;
+      size_t memSize;
+      size_t bytesLeft;
+      vector<MemoryChunk*> *array;
+
+      //returns total free space in MemPool
+      void freeSpace(){
+        bytesLeft = 0;
+        for(int i = 0; i < array->size(); i++){
+          if((*array)[i]->free == true){
+            bytesLeft += (*array)[i]->size;
+          }
+        }
+
+      }
   };
 
 
   // memory pools
   list<MemPool*> memPools;
 
- 
+
 
 
   // threads
@@ -92,13 +109,83 @@ extern "C" {
 
   MemPool* getMemPool(TVMMemoryPoolID id ){
     list<MemPool*>::iterator iter;
-    for(iter = memPools.begin(); iter != memPools.end();iter++){
-      if( id == (*iter)->id){
+    for(iter = memPools.begin(); iter != memPools.end(); iter++){
+      if(id == (*iter)->id){
         return *iter;
       }
     }
     return NULL;
   }
+
+  //the base and size of the memory array are specified by base and size respectively
+  //the memory pool identifier is put into the TVMMemoryPoolIDRef memory
+  //upon successful creation, return VM_STATUS_SUCCESS
+  //if the base or memory are NULL,or size is 0, return VM_STATUS_ERROR_INVALID_PARAMETER
+  TVMStatus VMMemoryPoolCreate(void *base, TVMMemorySize size, TVMMemoryPoolIDRef memory){
+    if(base == NULL || memory == NULL || size == 0){
+      return VM_STATUS_ERROR_INVALID_PARAMETER;
+    }
+    //else
+    //create memory in memorypools
+    return VM_STATUS_SUCCESS;
+  }
+
+  //deletes a memory pool that has no memory allocated from the pool, memory pool is specified by memory parameter
+  //successful deletion: return VM_STATUS_SUCCESS
+  //if memory is not a valid memory pool, return VM_STATUS_ERROR_INVALID_PARAMETER
+  //if memory has been allocated and not deallocated, return VM_STATUS_ERROR_INVALID_STATE
+  TVMStatus VMMemoryPoolDelete(TVMMemoryPoolID memory){
+    //if(memory is not a valid memory pool)
+    //return VM_STATUS_ERROR_INVALID_PARAMETER;
+    //if(memorypools[memory] has memory allocated)
+    //return VM_STATUS_ERROR_INVALID_STATE;
+    //else
+    // DELETE MEMORY POOL
+    return VM_STATUS_SUCCESS;
+  }
+
+  //query a memory pool for the available memory left
+  //the memory pool id is 'memory'
+  //the space left unallocated in the memory pool is placed inside bytesleft
+  TVMStatus VMMemoryPoolQuery(TVMMemoryPoolID memory, TVMMemorySizeRef bytesleft){
+    //if 'memory' is not a valid memory pool or bytesleft is NULL
+    //return VM_STATUS_ERROR_INVALID_PARAMETER;
+    MemPool* queryPool = getMemPool(memory);
+    if(queryPool == NULL|| queryPool->bytesLeft == NULL){
+      return VM_STATUS_ERROR_INVALID_PARAMETER;
+    }
+    *bytesleft = queryPool->bytesLeft;
+
+    //upon successful querying of the memory pool
+    return VM_STATUS_SUCCESS;
+  }
+
+  //the memory pool to allocate is specified by the memory parameter
+  //size is allocated by the size and the base of the allocated array specified by the pointer
+  //the allocated size will be rounded to the next multiple of 64bytes that is greater than or equal to the size parameter
+  TVMStatus VMMemoryPoolAllocate(TVMMemoryPoolID memory, TVMMemorySize size, void **pointer){
+    cout << "TRYING TO ALLOCATE: " << size << " FROM MEMORY POOL: " << memory << endl;
+    if(memory == NULL || size == 0 || pointer == NULL){
+      return VM_STATUS_ERROR_INVALID_PARAMETER;
+    }
+    //if memory pool does not have sufficient memory to allocate array of size bytes
+    //return VM_STATUS_ERROR_INSUFFICIENT_RESOURCES;
+  }
+
+  //the memory pool to deallocate is specified by the memory parameter
+  //the base of the previously allocated array is specified by pointer
+  TVMStatus VMMemoryPoolDeallocate(TVMMemoryPoolID memory, void *pointer){
+    if(pointer == NULL){
+      return VM_STATUS_ERROR_INVALID_PARAMETER;
+    }
+    //     If pointer does not specify a memory location that was previously allocated
+    // from the memory pool, VM_STATUS_ERROR_INVALID_PARAMETER
+    return VM_STATUS_SUCCESS;
+  }
+
+
+
+
 
   Mutex* getMutex(TVMMutexID mutexId){
     for(unsigned int i = 0; i < mutexList.size(); i++ ){
@@ -187,81 +274,7 @@ extern "C" {
     return VM_STATUS_SUCCESS;
   }
 
-  //the base and size of the memory array are specified by base and size respectively
-  //the memory pool identifier is put into the TVMMemoryPoolIDRef memory
-  //upon successful creation, return VM_STATUS_SUCCESS
-  //if the base or memory are NULL,or size is 0, return VM_STATUS_ERROR_INVALID_PARAMETER
-  TVMStatus VMMemoryPoolCreate(void *base, TVMMemorySize size, TVMMemoryPoolIDRef memory){
-    if(base == NULL || memory == NULL || size == 0){
-      return VM_STATUS_ERROR_INVALID_PARAMETER;
-    }
-    //else
-    MemPool* pool = new MemPool;
-    pool->memSize = size;
-    pool->id = poolCount++;
-    pool->basePtr = base;
-    *memory = pool->id; 
-    memPools.push_back(pool);
-
-
-
-    //create memory in memorypools
-    return VM_STATUS_SUCCESS;
-  }
-  
-  //deletes a memory pool that has no memory allocated from the pool, memory pool is specified by memory parameter
-  //successful deletion: return VM_STATUS_SUCCESS
-  //if memory is not a valid memory pool, return VM_STATUS_ERROR_INVALID_PARAMETER
-  //if memory has been allocated and not deallocated, return VM_STATUS_ERROR_INVALID_STATE
-  TVMStatus VMMemoryPoolDelete(TVMMemoryPoolID memory){
-    //if(memory is not a valid memory pool)
-    //return VM_STATUS_ERROR_INVALID_PARAMETER;
-    //if(memorypools[memory] has memory allocated)
-    //return VM_STATUS_ERROR_INVALID_STATE;
-    //else
-    // DELETE MEMORY POOL
-    return VM_STATUS_SUCCESS;
-  }
-
-  //query a memory pool for the available memory left
-  //the memory pool id is 'memory'
-  //the space left unallocated in the memory pool is placed inside bytesleft
-  TVMStatus VMMemoryPoolQuery(TVMMemoryPoolID memory, TVMMemorySizeRef bytesleft){
-    //if 'memory' is not a valid memory pool or bytesleft is NULL
-    //return VM_STATUS_ERROR_INVALID_PARAMETER;
-    MemPool* queryPool = getMemPool(memory);
-    if(queryPool == NULL|| queryPool->bytesleft == NULL){
-      return VM_STATUS_ERROR_INVALID_PARAMETER;
-    }
-    *bytesleft = queryPool->bytesleft;
-    
-    //upon successful querying of the memory pool
-    return VM_STATUS_SUCCESS;
-  }
-  
-  //the memory pool to allocate is specified by the memory parameter
-  //size is allocated by the size and the base of the allocated array specified by the pointer
-  //the allocated size will be rounded to the next multiple of 64bytes that is greater than or equal to the size parameter
-  TVMStatus VMMemoryPoolAllocate(TVMMemoryPoolID memory, TVMMemorySize size, void **pointer){
-    if(memory == NULL || size == 0 || pointer == NULL){
-      return VM_STATUS_ERROR_INVALID_PARAMETER;
-    }
-    //if memory pool does not have sufficient memory to allocate array of size bytes
-    //return VM_STATUS_ERROR_INSUFFICIENT_RESOURCES;
-    }
-
-  //the memory pool to deallocate is specified by the memory parameter
-  //the base of the previously allocated array is specified by pointer
-  TVMStatus VMMemoryPoolDeallocate(TVMMemoryPoolID memory, void *pointer){
-    if(pointer == NULL){
-      return VM_STATUS_ERROR_INVALID_PARAMETER;
-    }
-//     If pointer does not specify a memory location that was previously allocated
-// from the memory pool, VM_STATUS_ERROR_INVALID_PARAMETER
-    return VM_STATUS_SUCCESS;
-  }
-
-  //MachineInitialize(size_t sharesize);
+    //MachineInitialize(size_t sharesize);
   //the sharesize specifies the size of the shared memory location to be used in the machine
   //the size of the shared memory will be set to an integral number of pages (4096 bytes) that covers the size of sharesize
 
@@ -277,7 +290,7 @@ extern "C" {
   // TMachineFileCallback callback, 
   // void
   // *calldata);
-  
+
   // heapsize of the virtual machine is specified by heapsize
   // the heap is accessed by the applications through the VM_MEMORY_POOL_ID_SYSTEM memory pool
   // the size of shared memory space between the virtual machine and the machine is specified by the sharedsize
@@ -288,18 +301,19 @@ extern "C" {
     if(mainEntry == NULL){
       return VM_STATUS_FAILURE;
     }
-    
+
     TMachineAlarmCallback callback = callbackAlarm;
     MachineRequestAlarm(tickms*1000,callback,NULL);
 
     // allocate system memory
-    void* systemMemory = (void*)malloc(heapsize);
     MemPool* sysMM = new MemPool;
     sysMM->memSize = heapsize;
-    // VM_MEMORY_POOL_ID_SYSTEM
-    // sysMM->id = VM_MEMORY_POOL_ID_SYSTEM;
+    sysMM->id = VM_MEMORY_POOL_ID_SYSTEM;
+    // allocate base of memory
+    void* systemMemory = (void*)malloc(heapsize);
     sysMM->basePtr = systemMemory;
-
+    memPools.push_back(sysMM);
+    cout << "sysMM id: " << sysMM->id << " and size: " << sysMM->memSize << endl;
 
     // setup information for the main and idle thread
     //main thread
@@ -329,10 +343,10 @@ extern "C" {
     readyThreads.push(idleB);
     mainEntry(argc,argv);
 
-    
+
 
     MachineTerminate();
-   
+
     return VM_STATUS_SUCCESS;
   }
 
