@@ -8,9 +8,18 @@
 #include <string>
 #include <string.h>
 #include <list>
-
+#include <fcntl.h>
 using namespace std;
 extern "C" {
+  void fileOpenCallback(void* thread , int result);
+  void fileWCallback(void* thread,int result);
+  void fileCloseCallback(void* thread ,int result);
+  void fileSeekCallback(void* thread ,int result);
+  void fileReadCallback(void* thread ,int result);
+ 
+
+
+
 #define VM_THREAD_PRIORITY_IDLE                 ((TVMThreadPriority)0x00)
 
   volatile int TIMER;
@@ -24,6 +33,30 @@ extern "C" {
   volatile int poolCount = 1;
   TVMMainEntry VMLoadModule(const char *module);
   TVMStatus VMFilePrint(int filedescriptor, const char *format, ...);
+
+  class BPB{
+  public:
+      string OEM;
+      uint8_t sectorsPerCluster;
+      uint8_t rSector;
+      uint8_t FATCount;
+      uint8_t rootEntry;
+      uint8_t sectorCount16;
+      uint8_t media;
+      uint8_t FATSize;
+      uint8_t sectorPerTrack;
+      uint8_t headCount;
+      uint8_t sectorCount32;
+      uint8_t driveNum;
+      uint8_t bootSig;
+      uint8_t volumeID;
+      uint8_t volumeLabel;
+      uint16_t rootDirSectors;
+      uint16_t firstRootSector;
+      uint8_t firstDataSector;
+      uint16_t clusterCount;
+
+  };
 
   class TCB{
     public:
@@ -92,6 +125,7 @@ extern "C" {
         return *it;
       }
     }
+    return NULL;
   }
 
   // threads
@@ -101,85 +135,251 @@ extern "C" {
   pq readyThreads;
   vector<TCB*> sleepThreads;
   vector<Mutex*> mutexList;
+  
+  // FAT 
+  vector<uint16_t> FATs;
+  // BPB
+  BPB BPBInfo;
+  uint8_t BPB_DATA[512];
+ 
 
 
 
-TVMStatus VMDirectoryOpen(const char *dirname, int *dirdescriptor){
-  if(dirname == NULL || dirdescriptor == NULL){
-    return VM_STATUS_ERROR_INVALID_PARAMETER;
+
+  Mutex* getMutex(TVMMutexID mutexId){
+    for(unsigned int i = 0; i < mutexList.size(); i++ ){
+      if ( mutexId == mutexList[i]->id )
+        return mutexList[i];
+    }
+    return NULL;
   }
-  // open directory specified by dirname
 
-  // newly open directory will be placed in the location specified by dirdescriptor
+  TCB* getTCB(TVMThreadID id){
+    for (unsigned int i = 0;i < threadList.size();i++){
+      if (id == threadList[i]->id){
+        return threadList[i];
+      }
+    }
+    return NULL;
+  }
 
-  return VM_STATUS_SUCCESS;
-}
+  //  void getBPBinfo(unsigned int offset, unsigned int size, uint8_t* dataReturn ){
+  //   memcpy(dataReturn,BPBStructure+offset,size);
+  // }
 
-TVMStatus VMDirectoryClose(int dirdescriptor){
-  // closes a directory previously opened 
+
+  void threadSchedule(){
+    TCB* oldThread = currentThread;
+    //TCB* nextThread;
+    // cout << "schedule " << endl;
+    //cout << "current id: " << currentThread->id <<  endl;
+    //cout << "readyThread: " << readyThreads.top()->id << endl;
+    // cout << "size: " << readyThreads.size() << endl;
+    if (readyThreads.empty() ){
+      readyThreads.push(getTCB(2));
+    }
+    if(!readyThreads.empty( )){
+
+      currentThread = readyThreads.top();
+      currentThread->state = VM_THREAD_STATE_RUNNING;
+      readyThreads.pop();
+      //cout << "old thread id: " << oldThread->id << endl;
+      //cout << "new thread id: " << currentThread->id << endl;
+
+      // cout << "new id: " << currentThread->id << endl;
+      if (oldThread->id != currentThread->id){
+        //	cout << "switch" << endl;
+        SMachineContextRef oldContext = &oldThread->context;
+        SMachineContextRef newContext = &currentThread->context; 
+        MachineContextSwitch(oldContext,newContext);
+      }
+    }
+    // cout <<  "finish schedule" << endl;
+  }
+
+  void idleThread(void*){
+    // cout << "idle" << endl;
+    MachineResumeSignals(&sigstate);
+    while(true);
+    MachineResumeSignals(&sigstate);
+  }
+
+  void  callbackAlarm( void* t){
+    for(unsigned int i = 0; i < sleepThreads.size();i++){
+      //	cout << "ticks: " << sleepThreads[i]->vmTick << endl;
+      if ( sleepThreads[i]->vmTick == 0){
+        //	cout << "timeout:" << endl;
+        sleepThreads[i]->state = VM_THREAD_STATE_READY;
+        //cout << "pushing " << sleepThreads[i]->id << endl; 
+        readyThreads.push(sleepThreads[i]);
+        sleepThreads.erase(sleepThreads.begin() + i);
+        threadSchedule();
+      }	
+      sleepThreads[i]->vmTick--;
+    }
+  }
+
+  TVMStatus VMThreadSleep(TVMTick tick){
+    if (tick == VM_TIMEOUT_INFINITE){
+      return VM_STATUS_ERROR_INVALID_PARAMETER;
+    }
+    if (tick == VM_TIMEOUT_IMMEDIATE){
+      //current process yields the remainder of its processing quantum
+      // to the next ready process of equla priority
+    }
+    else{
+      currentThread->vmTick = tick;
+      currentThread->state = VM_THREAD_STATE_WAITING;
+      sleepThreads.push_back(currentThread);
+      threadSchedule();
+      //cout << "sleep thread id: " << currentThread->id << endl;		
+    }
+    //threadSchedule();
     return VM_STATUS_SUCCESS;
-}
-TVMStatus VMDirectoryRead(int dirdescriptor, SVMDirectoryEntryRef dirent){
-  if(dirent == NULL ){
-    VM_STATUS_ERROR_INVALID_PARAMETER;
   }
-  // attempts to read the next directory entry into the location specified by dirent from the file specfied by dirdescriptor
 
-  // dirdescriptor should have been obtained by a previous call to VMDirectoryOpen()
+  //MachineInitialize(size_t sharesize);
+  //the sharesize specifies the size of the shared memory location to be used in the machine
+  //the size of the shared memory will be set to an integral number of pages (4096 bytes) that covers the size of sharesize
 
-  // block if not completed
-  return VM_STATUS_SUCCESS;
-}
 
-TVMStatus VMDirectoryRewind(int dirdescriptor){
+  // heapsize of the virtual machine is specified by heapsize
+  // the heap is accessed by the applications through the VM_MEMORY_POOL_ID_SYSTEM memory pool
+  // the size of shared memory space between the virtual machine and the machine is specified by the sharedsize
+TVMStatus VMStart(int tickms, TVMMemorySize heapsize, TVMMemorySize sharedsize, const char *mount, int argc, char *argv[]){
 
-  // attempts to rewind the directory specified by dirdescriptor to the beginning
+    // shared memory
+    dataPtr = MachineInitialize(sharedsize);
+    MemoryChunk* shared = new MemoryChunk;
+    shared->beginPtr = dataPtr;
+    shared->size = sharedsize;
+    MemPool* sharedMM = new MemPool;
+    sharedMM->id = memoryPoolCount++;
+    sharedMM->memSize = sharedsize;
+ 
+    sharedMM->memoryAvailable = sharedsize;
+    sharedMM->base = dataPtr;
+    sharedMM->deleted = false;
+    sharedMM->PTRS_TO_FREE_BLOCKS.push_back(*shared);
+    memPools.push_back(sharedMM);
 
-  // The dirdescriptor should have been otained by a previous call to VMDirectoryOpen()
+    // allocate system memory
+    void* baseMemory = new uint8_t[heapsize];
+    MemoryChunk* chunk = new MemoryChunk;
+    chunk->beginPtr = baseMemory;
+    chunk->size = heapsize;
+    MemPool* heapMM = new MemPool; 
+    heapMM->id = memoryPoolCount++;
+    heapMM->memSize = heapsize;
+    heapMM->memoryAvailable = heapsize;
+    //cout << "Heapsize: " << heapsize << endl;
+    heapMM->base = baseMemory;
+    heapMM->deleted = false;
+    heapMM->PTRS_TO_FREE_BLOCKS.push_back(*chunk);
+    memPools.push_back(heapMM);
 
-  // block if not completed
-  return VM_STATUS_SUCCESS;
-}
+    // request time
+    TVMMainEntry mainEntry =  VMLoadModule(argv[0]);
+    if(mainEntry == NULL){
+      return VM_STATUS_FAILURE;
+    }
 
-TVMStatus VMDirectoryCurrent(char *abspath){
-  if(abspath == NULL){
-    return VM_STATUS_ERROR_INVALID_PARAMETER;
+    TMachineAlarmCallback callback = callbackAlarm;
+    MachineRequestAlarm(tickms*1000,callback,NULL);
+ 
+    // allocate base of memory
+
+    // setup information for the main and idle thread
+    //main thread
+    TCB* tstartBlk = new TCB;
+    tstartBlk->id = threadCount++;
+    tstartBlk->idref = 0;
+    tstartBlk->priority = VM_THREAD_PRIORITY_NORMAL;
+    tstartBlk->state = VM_THREAD_STATE_RUNNING;
+    tstartBlk->mmSize = 0;
+    tstartBlk->vmTick = 0;
+    // idle thread
+    TCB *idleB = new TCB;
+    idleB->entryCB = idleThread;
+    idleB->priority = VM_THREAD_PRIORITY_IDLE;
+    idleB->state = VM_THREAD_STATE_READY;
+    idleB->mmSize = 0x10000;
+    idleB->vmTick = 0;
+    idleB->id = threadCount++;
+    SMachineContextRef idleContext = new SMachineContext;
+    void* stackaddr = (void*)malloc(idleB->mmSize);
+    MachineContextCreate( idleContext, idleB->entryCB , idleB, stackaddr, idleB->mmSize);
+    idleB ->context = *idleContext;
+
+    threadList.push_back(idleB);
+    currentThread = tstartBlk;
+    readyThreads.push(idleB);
+    // mount image
+    // open image
+    int fd;
+    MachineFileOpen(mount,O_RDWR,0600,fileOpenCallback,currentThread);
+    currentThread->state = VM_THREAD_STATE_WAITING;
+    threadSchedule();
+    fd = currentThread->result;
+
+    // read image
+    void* memoryPool;
+    int len = 0;
+    VMMemoryPoolAllocate((TVMMemoryPoolID)0,512,&memoryPool);
+    MachineFileRead(fd,memoryPool,512,fileReadCallback,currentThread);
+    currentThread->state = VM_THREAD_STATE_WAITING;
+    threadSchedule();
+    len = currentThread->result;
+    cout << "read: " <<  len << endl;
+    // storing BPB
+    memcpy(BPB_DATA,(uint8_t*)memoryPool,512*sizeof(uint8_t));
+    std::cerr << "BPB_RsvdSecCnt = " << *(uint16_t *)(BPB_DATA + 13) << std::endl; //debugger
+
+    char oem[9];
+    memcpy(oem,BPB_DATA+3,8);
+    BPBInfo.OEM = string(oem,8); 
+   
+    //FirstRootSector = BPB_RsvdSecCnt + BPB_NumFATs * BPB_FATSz16;
+    uint16_t* BPB_Rsvd = (uint16_t *)(BPB_DATA + 14); 
+    uint16_t* BPB_NumFATs = (uint16_t*)(BPB_DATA + 16);
+    uint16_t* BPB_FATSz16 = (uint16_t*)(BPB_DATA + 22);
+  
+
+    BPBInfo.firstRootSector = *BPB_Rsvd + *BPB_NumFATs * (*BPB_FATSz16);
+
+    //RootDirectorySectors = (BPB_RootEntCnt * 32) / 512;
+    uint16_t* BPB_RootEntCnt = (uint16_t*)(BPB_DATA + 17);
+    BPBInfo.rootDirSectors = (*BPB_RootEntCnt * 32)/512;
+
+    // FirstDataSector = FirstRootSector + RootDirectorySectors;
+    BPBInfo.firstDataSector = BPBInfo.firstRootSector + BPBInfo.rootDirSectors;
+
+    // ClusterCount = (BPB_TotSec32 - FirstDataSector) / BPB_SecPerClus;
+    uint32_t* BPB_TotSec32 = (uint32_t*)(BPB_DATA + 32);
+    uint8_t* BPB_SecPerClus = (uint8_t*)(BPB_DATA + 13);
+    BPBInfo.clusterCount = ( *BPB_TotSec32 - BPBInfo.firstDataSector)/ (*BPB_SecPerClus);
+
+    //
+
+
+
+
+
+
+
+
+
+
+
+    mainEntry(argc,argv);
+
+    MachineTerminate();
+    return VM_STATUS_SUCCESS;
   }
-  // place the absolute path of the current working directory in the location specifiec by abspath
-  return VM_STATUS_SUCCESS;
-}
-
-TVMStatus VMDirectoryChange(const char *path){
-  if(path == NULL){
-    return VM_STATUS_ERROR_INVALID_PARAMETER;
-  }
-  // changes the current working directory of the mounted FAT file system to the name specified by path
-  return VM_STATUS_SUCCESS;
-}
-
-TVMStatus VMDirectoryCreate(const char *dirname){
-  if(dirname == NULL){
-    return VM_STATUS_ERROR_INVALID_PARAMETER;
-  }
-  // creates a directory in the mounted FAT file system specified by dirname
-  return VM_STATUS_SUCCESS;
-}
-
-TVMStatus VMDirectoryUnlink(const char *path){
-  if(path == NULL){
-    return VM_STATUS_ERROR_INVALID_PARAMETER;
-  }
-  // attempts to remove the file or directory specified by path from the  mounted FAT file system
-
-  // VMDirectoryUnlink() will fail if the file or directory is current 
-  // opened, or if the directory attempting to be unlinked is a parent of an open file or directory
-  return VM_STATUS_SUCCESS;
-}
 
 
 
-
-  //the base and size of the memory array are specified by base and size respectively
+    //the base and size of the memory array are specified by base and size respectively
   //the memory pool identifier is put into the TVMMemoryPoolIDRef memory
   //upon successful creation, return VM_STATUS_SUCCESS
   //if the base or memory are NULL,or size is 0, return VM_STATUS_ERROR_INVALID_PARAMETER
@@ -293,11 +493,12 @@ TVMStatus VMDirectoryUnlink(const char *path){
           (*FREE_BLOCKS).erase((*FREE_BLOCKS).begin()+i);
           //cout << "AFTER ERASE FREE: " << (FREE_BLOCKS)->size() << endl;
           return VM_STATUS_SUCCESS;
-        }
+        }/*
         // if it's not exactly equal to the size
         // split FREE PARTITION
         //         /       \
         //      NEW    OLD BLOCK PUSHED FORWARD
+        */
         MemoryChunk* NEW = new MemoryChunk;
         //set NEW to point to beginning of chunk
         //size of NEW will be size required for allocation
@@ -339,7 +540,7 @@ TVMStatus VMDirectoryUnlink(const char *path){
     MemoryChunk* memoryBlockTarget;
     void* BEGINNING_OF_USED_BLOCK;
     void* BEGINNING_OF_FREE_BLOCK;
-    void* LOOK_AHEAD_POINTER;
+    // void* LOOK_AHEAD_POINTER;
     bool deallocateAll = false;
         //cout << "Number of free blocks: " << (FREE_BLOCKS)->size() << endl;
         unsigned int totalfree = 0;
@@ -427,179 +628,6 @@ TVMStatus VMDirectoryUnlink(const char *path){
 
 
 
-
-  Mutex* getMutex(TVMMutexID mutexId){
-    for(unsigned int i = 0; i < mutexList.size(); i++ ){
-      if ( mutexId == mutexList[i]->id )
-        return mutexList[i];
-    }
-    return NULL;
-  }
-
-  TCB* getTCB(TVMThreadID id){
-    for (unsigned int i = 0;i < threadList.size();i++){
-      if (id == threadList[i]->id){
-        return threadList[i];
-      }
-    }
-    return NULL;
-  }
-
-  void threadSchedule(){
-    TCB* oldThread = currentThread;
-    //TCB* nextThread;
-    // cout << "schedule " << endl;
-    //cout << "current id: " << currentThread->id <<  endl;
-    //cout << "readyThread: " << readyThreads.top()->id << endl;
-    // cout << "size: " << readyThreads.size() << endl;
-    if (readyThreads.empty() ){
-      readyThreads.push(getTCB(2));
-    }
-    if(!readyThreads.empty( )){
-
-      currentThread = readyThreads.top();
-      currentThread->state = VM_THREAD_STATE_RUNNING;
-      readyThreads.pop();
-      //cout << "old thread id: " << oldThread->id << endl;
-      //cout << "new thread id: " << currentThread->id << endl;
-
-      // cout << "new id: " << currentThread->id << endl;
-      if (oldThread->id != currentThread->id){
-        //	cout << "switch" << endl;
-        SMachineContextRef oldContext = &oldThread->context;
-        SMachineContextRef newContext = &currentThread->context; 
-        MachineContextSwitch(oldContext,newContext);
-      }
-    }
-    // cout <<  "finish schedule" << endl;
-  }
-
-  void idleThread(void*){
-    // cout << "idle" << endl;
-    MachineResumeSignals(&sigstate);
-    while(true);
-    MachineResumeSignals(&sigstate);
-  }
-
-  void  callbackAlarm( void* t){
-    for(unsigned int i = 0; i < sleepThreads.size();i++){
-      //	cout << "ticks: " << sleepThreads[i]->vmTick << endl;
-      if ( sleepThreads[i]->vmTick == 0){
-        //	cout << "timeout:" << endl;
-        sleepThreads[i]->state = VM_THREAD_STATE_READY;
-        //cout << "pushing " << sleepThreads[i]->id << endl; 
-        readyThreads.push(sleepThreads[i]);
-        sleepThreads.erase(sleepThreads.begin() + i);
-        threadSchedule();
-      }	
-      sleepThreads[i]->vmTick--;
-    }
-  }
-
-  TVMStatus VMThreadSleep(TVMTick tick){
-    if (tick == VM_TIMEOUT_INFINITE){
-      return VM_STATUS_ERROR_INVALID_PARAMETER;
-    }
-    if (tick == VM_TIMEOUT_IMMEDIATE){
-      //current process yields the remainder of its processing quantum
-      // to the next ready process of equla priority
-    }
-    else{
-      currentThread->vmTick = tick;
-      currentThread->state = VM_THREAD_STATE_WAITING;
-      sleepThreads.push_back(currentThread);
-      threadSchedule();
-      //cout << "sleep thread id: " << currentThread->id << endl;		
-    }
-    //threadSchedule();
-    return VM_STATUS_SUCCESS;
-  }
-
-  //MachineInitialize(size_t sharesize);
-  //the sharesize specifies the size of the shared memory location to be used in the machine
-  //the size of the shared memory will be set to an integral number of pages (4096 bytes) that covers the size of sharesize
-
-
-  // heapsize of the virtual machine is specified by heapsize
-  // the heap is accessed by the applications through the VM_MEMORY_POOL_ID_SYSTEM memory pool
-  // the size of shared memory space between the virtual machine and the machine is specified by the sharedsize
-TVMStatus VMStart(int tickms, TVMMemorySize heapsize, TVMMemorySize sharedsize, const char *mount, int argc, char *argv[]){
-    // mount image
-
-
-    // shared memory
-    dataPtr = MachineInitialize(sharedsize);
-    MemoryChunk* shared = new MemoryChunk;
-    shared->beginPtr = dataPtr;
-    shared->size = sharedsize;
-    MemPool* sharedMM = new MemPool;
-    sharedMM->id = memoryPoolCount++;
-    sharedMM->memSize = sharedsize;
- 
-    sharedMM->memoryAvailable = sharedsize;
-    sharedMM->base = dataPtr;
-    sharedMM->deleted = false;
-    sharedMM->PTRS_TO_FREE_BLOCKS.push_back(*shared);
-    memPools.push_back(sharedMM);
-
-    // allocate system memory
-    void* baseMemory = new uint8_t[heapsize];
-    MemoryChunk* chunk = new MemoryChunk;
-    chunk->beginPtr = baseMemory;
-    chunk->size = heapsize;
-    MemPool* heapMM = new MemPool; 
-    heapMM->id = memoryPoolCount++;
-    heapMM->memSize = heapsize;
-    heapMM->memoryAvailable = heapsize;
-    //cout << "Heapsize: " << heapsize << endl;
-    heapMM->base = baseMemory;
-    heapMM->deleted = false;
-    heapMM->PTRS_TO_FREE_BLOCKS.push_back(*chunk);
-    memPools.push_back(heapMM); 
-
-
-    // request time
-    TVMMainEntry mainEntry =  VMLoadModule(argv[0]);
-    if(mainEntry == NULL){
-      return VM_STATUS_FAILURE;
-    }
-
-    TMachineAlarmCallback callback = callbackAlarm;
-    MachineRequestAlarm(tickms*1000,callback,NULL);
-    //MemoryChunk* base =  
-    // allocate base of memory
-
-    // setup information for the main and idle thread
-    //main thread
-    TCB* tstartBlk = new TCB;
-    tstartBlk->id = threadCount++;
-    tstartBlk->idref = 0;
-    tstartBlk->priority = VM_THREAD_PRIORITY_NORMAL;
-    tstartBlk->state = VM_THREAD_STATE_RUNNING;
-    tstartBlk->mmSize = 0;
-    tstartBlk->vmTick = 0;
-    // idle thread
-    TCB *idleB = new TCB;
-    idleB->entryCB = idleThread;
-    idleB->priority = VM_THREAD_PRIORITY_IDLE;
-    idleB->state = VM_THREAD_STATE_READY;
-    idleB->mmSize = 0x10000;
-    idleB->vmTick = 0;
-    idleB->id = threadCount++;
-    SMachineContextRef idleContext = new SMachineContext;
-    void* stackaddr = (void*)malloc(idleB->mmSize);
-    MachineContextCreate( idleContext, idleB->entryCB , idleB, stackaddr, idleB->mmSize);
-    idleB ->context = *idleContext;
-
-    threadList.push_back(idleB);
-    currentThread = tstartBlk;
-
-    readyThreads.push(idleB);
-    mainEntry(argc,argv);
-
-    MachineTerminate();
-    return VM_STATUS_SUCCESS;
-  }
 
   TVMStatus VMTickMS(int *tickmsref){
     if(tickmsref == NULL){
@@ -925,4 +953,80 @@ TVMStatus VMStart(int tickms, TVMMemorySize heapsize, TVMMemorySize sharedsize, 
     MachineResumeSignals(&sigstate);
     return VM_STATUS_SUCCESS;
   }
+
+
+TVMStatus VMDirectoryOpen(const char *dirname, int *dirdescriptor){
+  if(dirname == NULL || dirdescriptor == NULL){
+    return VM_STATUS_ERROR_INVALID_PARAMETER;
+  }
+  // open directory specified by dirname
+
+  // newly open directory will be placed in the location specified by dirdescriptor
+
+  return VM_STATUS_SUCCESS;
+}
+
+TVMStatus VMDirectoryClose(int dirdescriptor){
+  // closes a directory previously opened 
+    return VM_STATUS_SUCCESS;
+}
+TVMStatus VMDirectoryRead(int dirdescriptor, SVMDirectoryEntryRef dirent){
+  if(dirent == NULL ){
+    return VM_STATUS_ERROR_INVALID_PARAMETER;
+  }
+  // attempts to read the next directory entry into the location specified by dirent from the file specfied by dirdescriptor
+
+  // dirdescriptor should have been obtained by a previous call to VMDirectoryOpen()
+
+  // block if not completed
+  return VM_STATUS_SUCCESS;
+}
+
+TVMStatus VMDirectoryRewind(int dirdescriptor){
+
+  // attempts to rewind the directory specified by dirdescriptor to the beginning
+
+  // The dirdescriptor should have been otained by a previous call to VMDirectoryOpen()
+
+  // block if not completed
+  return VM_STATUS_SUCCESS;
+}
+
+TVMStatus VMDirectoryCurrent(char *abspath){
+  if(abspath == NULL){
+    return VM_STATUS_ERROR_INVALID_PARAMETER;
+  }
+  // place the absolute path of the current working directory in the location specifiec by abspath
+  return VM_STATUS_SUCCESS;
+}
+
+TVMStatus VMDirectoryChange(const char *path){
+  if(path == NULL){
+    return VM_STATUS_ERROR_INVALID_PARAMETER;
+  }
+  // changes the current working directory of the mounted FAT file system to the name specified by path
+  return VM_STATUS_SUCCESS;
+}
+
+TVMStatus VMDirectoryCreate(const char *dirname){
+  if(dirname == NULL){
+    return VM_STATUS_ERROR_INVALID_PARAMETER;
+  }
+  // creates a directory in the mounted FAT file system specified by dirname
+  return VM_STATUS_SUCCESS;
+}
+
+TVMStatus VMDirectoryUnlink(const char *path){
+  if(path == NULL){
+    return VM_STATUS_ERROR_INVALID_PARAMETER;
+  }
+  // attempts to remove the file or directory specified by path from the  mounted FAT file system
+
+  // VMDirectoryUnlink() will fail if the file or directory is current 
+  // opened, or if the directory attempting to be unlinked is a parent of an open file or directory
+  return VM_STATUS_SUCCESS;
+}
+
+
+
 } 
