@@ -102,15 +102,82 @@ extern "C" {
   vector<TCB*> sleepThreads;
   vector<Mutex*> mutexList;
 
-  /*MemPool getMemPool(TVMMemoryPoolID id ){
-    list<MemPool>::iterator iter;
-    for(iter = memPools.begin(); iter != memPools.end(); iter++){
-    if(id == (iter)id){
-    return iter;
-    }
-    }
-    return NULL;
-    }*/
+
+
+TVMStatus VMDirectoryOpen(const char *dirname, int *dirdescriptor){
+  if(dirname == NULL || dirdescriptor == NULL){
+    return VM_STATUS_ERROR_INVALID_PARAMETER;
+  }
+  // open directory specified by dirname
+
+  // newly open directory will be placed in the location specified by dirdescriptor
+
+  return VM_STATUS_SUCCESS;
+}
+
+TVMStatus VMDirectoryClose(int dirdescriptor){
+  // closes a directory previously opened 
+    return VM_STATUS_SUCCESS;
+}
+TVMStatus VMDirectoryRead(int dirdescriptor, SVMDirectoryEntryRef dirent){
+  if(dirent == NULL ){
+    VM_STATUS_ERROR_INVALID_PARAMETER;
+  }
+  // attempts to read the next directory entry into the location specified by dirent from the file specfied by dirdescriptor
+
+  // dirdescriptor should have been obtained by a previous call to VMDirectoryOpen()
+
+  // block if not completed
+  return VM_STATUS_SUCCESS;
+}
+
+TVMStatus VMDirectoryRewind(int dirdescriptor){
+
+  // attempts to rewind the directory specified by dirdescriptor to the beginning
+
+  // The dirdescriptor should have been otained by a previous call to VMDirectoryOpen()
+
+  // block if not completed
+  return VM_STATUS_SUCCESS;
+}
+
+TVMStatus VMDirectoryCurrent(char *abspath){
+  if(abspath == NULL){
+    return VM_STATUS_ERROR_INVALID_PARAMETER;
+  }
+  // place the absolute path of the current working directory in the location specifiec by abspath
+  return VM_STATUS_SUCCESS;
+}
+
+TVMStatus VMDirectoryChange(const char *path){
+  if(path == NULL){
+    return VM_STATUS_ERROR_INVALID_PARAMETER;
+  }
+  // changes the current working directory of the mounted FAT file system to the name specified by path
+  return VM_STATUS_SUCCESS;
+}
+
+TVMStatus VMDirectoryCreate(const char *dirname){
+  if(dirname == NULL){
+    return VM_STATUS_ERROR_INVALID_PARAMETER;
+  }
+  // creates a directory in the mounted FAT file system specified by dirname
+  return VM_STATUS_SUCCESS;
+}
+
+TVMStatus VMDirectoryUnlink(const char *path){
+  if(path == NULL){
+    return VM_STATUS_ERROR_INVALID_PARAMETER;
+  }
+  // attempts to remove the file or directory specified by path from the  mounted FAT file system
+
+  // VMDirectoryUnlink() will fail if the file or directory is current 
+  // opened, or if the directory attempting to be unlinked is a parent of an open file or directory
+  return VM_STATUS_SUCCESS;
+}
+
+
+
 
   //the base and size of the memory array are specified by base and size respectively
   //the memory pool identifier is put into the TVMMemoryPoolIDRef memory
@@ -452,32 +519,23 @@ extern "C" {
   //the sharesize specifies the size of the shared memory location to be used in the machine
   //the size of the shared memory will be set to an integral number of pages (4096 bytes) that covers the size of sharesize
 
-  //MachineFileRead
-  //void
-  // MachineFileRead(
-  // int
-  // fd, 
-  // void
-  // *data, 
-  // int
-  // length, 
-  // TMachineFileCallback callback, 
-  // void
-  // *calldata);
 
   // heapsize of the virtual machine is specified by heapsize
   // the heap is accessed by the applications through the VM_MEMORY_POOL_ID_SYSTEM memory pool
   // the size of shared memory space between the virtual machine and the machine is specified by the sharedsize
-  TVMStatus VMStart(int tickms, TVMMemorySize heapsize, TVMMemorySize sharedsize, int argc, char *argv[]){
-    dataPtr = MachineInitialize(sharedsize);
+TVMStatus VMStart(int tickms, TVMMemorySize heapsize, TVMMemorySize sharedsize, const char *mount, int argc, char *argv[]){
+    // mount image
 
+
+    // shared memory
+    dataPtr = MachineInitialize(sharedsize);
     MemoryChunk* shared = new MemoryChunk;
     shared->beginPtr = dataPtr;
     shared->size = sharedsize;
     MemPool* sharedMM = new MemPool;
     sharedMM->id = memoryPoolCount++;
     sharedMM->memSize = sharedsize;
-    //cout << "Sharedsize: " << sharedsize << endl;
+ 
     sharedMM->memoryAvailable = sharedsize;
     sharedMM->base = dataPtr;
     sharedMM->deleted = false;
@@ -540,7 +598,6 @@ extern "C" {
     mainEntry(argc,argv);
 
     MachineTerminate();
-
     return VM_STATUS_SUCCESS;
   }
 
@@ -856,6 +913,7 @@ extern "C" {
       threadSchedule();
       memcpy(data, newMemoryPool, bytes);
       totalBytes = totalBytes - bytes;
+      *length = currentThread->result;
       data+= bytes; 
     }
     VMMemoryPoolDeallocate((TVMMemoryPoolID)0, &newMemoryPool);
