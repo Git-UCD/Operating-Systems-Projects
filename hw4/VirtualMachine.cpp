@@ -36,33 +36,32 @@ extern "C" {
   TVMStatus VMFilePrint(int filedescriptor, const char *format, ...);
 
   class BPB{
-  public:
-      string OEM;
-      uint8_t sectorsPerCluster;
-      uint8_t rSector;
-      uint8_t FATCount;
-      uint8_t rootEntry;
-      uint8_t sectorCount16;
-      uint8_t media;
-      uint8_t FATSize;
-      uint8_t sectorPerTrack;
-      uint8_t headCount;
-      uint8_t sectorCount32;
-      uint8_t driveNum;
-      uint8_t bootSig;
-      uint8_t volumeID;
-      uint8_t volumeLabel;
-      uint16_t rootDirSectors;
-      uint16_t firstRootSector;
-      uint8_t firstDataSector;
-      uint16_t clusterCount;
-
+    public:
+      string   OEM;
+      uint16_t bytesPerSector;
+      //uint8_t  sectorsPerCluster;
+      // all ints from here on out were uint8_t
+      int      sectorsPerCluster;
+      uint16_t reservedSectorCount;
+      int      numberOfFats;
+      int      rootEntryCount;
+      uint16_t totalSector16;
+      int      media;
+      uint16_t fatSize16;
+      uint16_t sectorsPerTrack;
+      uint16_t heads;
+      uint32_t hiddenSectors;
+      uint32_t totalSector32;
+      int      driveNumber;
+      int      bootSignature;
+      uint32_t volumeID;
+      string   volumeLabel;
+      string   fileSysType;
+      uint64_t firstRootSector;
+      uint64_t rootDirectorySectors;
+      uint64_t firstDataSector;
+      uint64_t clusterCount;
   };
-
-  // class RootEntry{
-
-
-  // };
 
   class TCB{
     public:
@@ -145,7 +144,29 @@ extern "C" {
   // FAT 
   vector<uint16_t> FATs;
   // BPB
-  BPB BPBInfo;
+  BPB BPBinfo;
+  void printBPBinfo(){
+    cout << "OEM Name           : " << BPBinfo.OEM << endl;
+    cout << "Bytes Per Sector   : " << BPBinfo.bytesPerSector << endl;
+    cout << "Sectors Per Cluster: " << BPBinfo.sectorsPerCluster << endl;
+    cout << "Reserved Sectors   : " << BPBinfo.reservedSectorCount << endl;
+    cout << "FAT Count          : " << BPBinfo.numberOfFats << endl;
+    cout << "Root Entry         : " << BPBinfo.firstRootSector << endl;
+    cout << "Sector Count 16    : " << BPBinfo.totalSector16 << endl;
+    cout << "Media              : " << BPBinfo.media << endl;
+    cout << "Fat Size 16        : " << BPBinfo.fatSize16 << endl;
+    cout << "Sectors Per Track  : " << BPBinfo.sectorsPerTrack << endl;
+    cout << "Head Count         : " << BPBinfo.heads << endl;
+    cout << "Hidden Sector Count: " << BPBinfo.hiddenSectors << endl;
+    cout << "Sector Count 32    : " << BPBinfo.totalSector32 << endl;
+    cout << "Drive Number       : " << BPBinfo.driveNumber << endl;
+    cout << "Volume ID          : " << hex << uppercase << BPBinfo.volumeID << endl;
+    cout << "File System Type   : " << "\"" << BPBinfo.fileSysType << "\"" << endl;
+    cout << "Root Dir Sectors   : " << BPBinfo.rootDirectorySectors << endl;
+    cout << "First Root Sector  : " << BPBinfo.firstRootSector << endl;
+    cout << "First Data Sector  : " << BPBinfo.firstDataSector << endl;
+    cout << "Cluster Count      : " << BPBinfo.clusterCount << endl;
+  }
   uint8_t BPB_DATA[512];
  
 
@@ -339,44 +360,60 @@ TVMStatus VMStart(int tickms, TVMMemorySize heapsize, TVMMemorySize sharedsize, 
     VMMemoryPoolDeallocate((TVMMemoryPoolID)0,&memoryPoolBPB);
     // storing BPB
     memcpy(BPB_DATA,(uint8_t*)memoryPoolBPB,512*sizeof(uint8_t));
-    std::cerr << "BPB_RsvdSecCnt = " << *(uint16_t *)(BPB_DATA + 13) << std::endl; //debugger
+    //std::cerr << "BPB_RsvdSecCnt = " << *(uint16_t *)(BPB_DATA + 13) << std::endl; //debugger
 
     char oem[9];
     memcpy(oem,BPB_DATA+3,8);
-    BPBInfo.OEM = string(oem,8); 
-   
-    //FirstRootSector = BPB_RsvdSecCnt + BPB_NumFATs * BPB_FATSz16;
-    uint16_t* BPB_Rsvd = (uint16_t *)(BPB_DATA + 14); 
-    uint16_t* BPB_NumFATs = (uint16_t*)(BPB_DATA + 16);
-    uint16_t* BPB_FATSz16 = (uint16_t*)(BPB_DATA + 22);
-    BPBInfo.firstRootSector = *BPB_Rsvd + *BPB_NumFATs * (*BPB_FATSz16);
-
+    BPBinfo.OEM = string(oem,8);
+    char systype[8];
+    memcpy(systype, BPB_DATA+54,8);
+    BPBinfo.fileSysType = string(systype,8);
+    //char id[33];
+    //memcpy(id, BPB_DATA+39, 32);
+    //BPBinfo.volumeID = string(id,32);
+    BPBinfo.volumeID = *(uint32_t *)(BPB_DATA + 39);
+    BPBinfo.bytesPerSector = *(uint16_t *)(BPB_DATA + 11);
+    BPBinfo.sectorsPerTrack = *(uint16_t *)(BPB_DATA + 24);
+    BPBinfo.sectorsPerCluster =(int)(*(uint8_t *)(BPB_DATA + 13));
+    BPBinfo.reservedSectorCount = *(uint16_t *)(BPB_DATA + 14);
+    BPBinfo.numberOfFats = *(uint16_t*)(BPB_DATA + 16);
+    BPBinfo.fatSize16 = *(uint16_t*)(BPB_DATA + 22);
+    BPBinfo.totalSector32 = *(uint32_t*)(BPB_DATA + 32);
+    BPBinfo.heads = *(uint16_t*)(BPB_DATA + 26);
+    BPBinfo.media = *(uint8_t*)(BPB_DATA + 21);
+    BPBinfo.firstRootSector = BPBinfo.reservedSectorCount + BPBinfo.numberOfFats * BPBinfo.fatSize16;
     //RootDirectorySectors = (BPB_RootEntCnt * 32) / 512;
     uint16_t* BPB_RootEntCnt = (uint16_t*)(BPB_DATA + 17);
-    BPBInfo.rootDirSectors = (*BPB_RootEntCnt * 32)/512;
+    BPBinfo.rootEntryCount = (int)(*BPB_RootEntCnt);
+    //BPBInfo.rootDirSectors = (*BPB_RootEntCnt * 32)/512;
+    BPBinfo.rootDirectorySectors = (*BPB_RootEntCnt * 32) / 512;
 
     // FirstDataSector = FirstRootSector + RootDirectorySectors;
-    BPBInfo.firstDataSector = BPBInfo.firstRootSector + BPBInfo.rootDirSectors;
+    //BPBInfo.firstDataSector = BPBInfo.firstRootSector + BPBInfo.rootDirSectors;
+    BPBinfo.firstDataSector = BPBinfo.firstRootSector + BPBinfo.rootDirectorySectors;
 
     // ClusterCount = (BPB_TotSec32 - FirstDataSector) / BPB_SecPerClus;
     uint32_t* BPB_TotSec32 = (uint32_t*)(BPB_DATA + 32);
     uint8_t* BPB_SecPerClus = (uint8_t*)(BPB_DATA + 13);
-    BPBInfo.clusterCount = ( *BPB_TotSec32 - BPBInfo.firstDataSector)/ (*BPB_SecPerClus);
+    BPBinfo.clusterCount = ( *BPB_TotSec32 - BPBinfo.firstDataSector)/ (*BPB_SecPerClus);
+
+    printBPBinfo();
+
 
     // seek to where FAT is 
     MachineFileSeek(fd,512,0,fileSeekCallback,currentThread);
     threadSchedule();
     int newoffset = currentThread->result;
-    cout << "newoffset: " << newoffset << endl;
+    //cout << "newoffset: " << newoffset << endl;
     //new offset
     // using shared memory
     void* memoryPoolFAT;
     VMMemoryPoolAllocate((TVMMemoryPoolID)0,512,&memoryPoolFAT);
-    unsigned int readBytes = BPBInfo.clusterCount;
+    unsigned int readBytes = BPBinfo.clusterCount;
     int byteslimit = 512; 
        // read FAT
-    uint16_t FAT[BPBInfo.clusterCount];
-    void* data = malloc(BPBInfo.clusterCount*sizeof(uint16_t));
+    uint16_t FAT[BPBinfo.clusterCount];
+    void* data = malloc(BPBinfo.clusterCount*sizeof(uint16_t));
     int sizeRead = 0; 
     while(readBytes>0){
       MachineFileRead(fd,memoryPoolFAT,byteslimit,fileReadCallback,currentThread);
@@ -389,13 +426,13 @@ TVMStatus VMStart(int tickms, TVMMemorySize heapsize, TVMMemorySize sharedsize, 
     }
 
     VMMemoryPoolDeallocate((TVMMemoryPoolID)0,&memoryPoolFAT);
-    memcpy(FAT,data,BPBInfo.clusterCount);
+    memcpy(FAT,data,BPBinfo.clusterCount);
 
     // seek to root directory
-    MachineFileSeek(fd,BPBInfo.firstRootSector*512,0,fileSeekCallback,currentThread);
+    MachineFileSeek(fd,BPBinfo.firstRootSector*512,0,fileSeekCallback,currentThread);
     threadSchedule();
     int rootoffset = currentThread->result;
-    cout << "rootoffset: " << rootoffset << endl;
+    //cout << "rootoffset: " << rootoffset << endl;
     // read entries
     // shared memory
     void* memoryPoolRoot;
@@ -409,17 +446,17 @@ TVMStatus VMStart(int tickms, TVMMemorySize heapsize, TVMMemorySize sharedsize, 
       currentThread->state = VM_THREAD_STATE_WAITING;
       threadSchedule();
       memcpy(readData,memoryPoolRoot,byteslimit);
-      std::cerr << "name = " << *(uint16_t *)(memoryPoolRoot ) << std::endl; //debugger
+      //std::cerr << "name = " << *(uint16_t *)(memoryPoolRoot ) << std::endl; //debugger
 
       readData += 512;
       totalBytes = totalBytes - byteslimit;
       readTotal += currentThread->result;
     }
     memcpy(rootDirData,readData,(*BPB_RootEntCnt)*32*sizeof(uint16_t));
-    cout << "total read: " << readTotal << endl;
-    cout << "entries: " << *BPB_RootEntCnt << endl;
+    //cout << "total read: " << readTotal << endl;
+    //cout << "entries: " << *BPB_RootEntCnt << endl;
   
-    std::cerr << "name = " << *(uint8_t *)(readData ) << std::endl; //debugger
+    //std::cerr << "name = " << *(uint8_t *)(readData ) << std::endl; //debugger
 
     cout << endl;
 
@@ -450,7 +487,6 @@ TVMStatus VMStart(int tickms, TVMMemorySize heapsize, TVMMemorySize sharedsize, 
   //upon successful creation, return VM_STATUS_SUCCESS
   //if the base or memory are NULL,or size is 0, return VM_STATUS_ERROR_INVALID_PARAMETER
   TVMStatus VMMemoryPoolCreate(void *base, TVMMemorySize size, TVMMemoryPoolIDRef memory){
-    int validSizes = memoryPoolCount;
     if(size == 0 || base == NULL || memory == NULL){
       return VM_STATUS_ERROR_INVALID_PARAMETER;
     }
@@ -605,7 +641,6 @@ TVMStatus VMStart(int tickms, TVMMemorySize heapsize, TVMMemorySize sharedsize, 
     int NUMBER_OF_USED_BLOCKS = USED_BLOCKS->size();
     MemoryChunk* memoryBlockTarget;
     void* BEGINNING_OF_USED_BLOCK;
-    void* BEGINNING_OF_FREE_BLOCK;
     // void* LOOK_AHEAD_POINTER;
     bool deallocateAll = false;
         //cout << "Number of free blocks: " << (FREE_BLOCKS)->size() << endl;
