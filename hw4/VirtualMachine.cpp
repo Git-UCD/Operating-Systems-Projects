@@ -17,7 +17,7 @@ extern "C" {
   void fileCloseCallback(void* thread ,int result);
   void fileSeekCallback(void* thread ,int result);
   void fileReadCallback(void* thread ,int result);
- 
+  void initializeBPB();
 
 
 
@@ -140,7 +140,7 @@ extern "C" {
   pq readyThreads;
   vector<TCB*> sleepThreads;
   vector<Mutex*> mutexList;
-  
+
   // FAT 
   vector<uint16_t> FATs;
   // BPB
@@ -170,7 +170,7 @@ extern "C" {
     MachineResumeSignals(&sigstate);
   }
   uint8_t BPB_DATA[512];
- 
+
 
 
 
@@ -275,7 +275,7 @@ extern "C" {
   // heapsize of the virtual machine is specified by heapsize
   // the heap is accessed by the applications through the VM_MEMORY_POOL_ID_SYSTEM memory pool
   // the size of shared memory space between the virtual machine and the machine is specified by the sharedsize
-TVMStatus VMStart(int tickms, TVMMemorySize heapsize, TVMMemorySize sharedsize, const char *mount, int argc, char *argv[]){
+  TVMStatus VMStart(int tickms, TVMMemorySize heapsize, TVMMemorySize sharedsize, const char *mount, int argc, char *argv[]){
 
     // shared memory
     dataPtr = MachineInitialize(sharedsize);
@@ -285,7 +285,7 @@ TVMStatus VMStart(int tickms, TVMMemorySize heapsize, TVMMemorySize sharedsize, 
     MemPool* sharedMM = new MemPool;
     sharedMM->id = memoryPoolCount++;
     sharedMM->memSize = sharedsize;
- 
+
     sharedMM->memoryAvailable = sharedsize;
     sharedMM->base = dataPtr;
     sharedMM->deleted = false;
@@ -315,7 +315,7 @@ TVMStatus VMStart(int tickms, TVMMemorySize heapsize, TVMMemorySize sharedsize, 
 
     TMachineAlarmCallback callback = callbackAlarm;
     MachineRequestAlarm(tickms*1000,callback,NULL);
- 
+
     // allocate base of memory
 
     // setup information for the main and idle thread
@@ -364,31 +364,7 @@ TVMStatus VMStart(int tickms, TVMMemorySize heapsize, TVMMemorySize sharedsize, 
     memcpy(BPB_DATA,(uint8_t*)memoryPoolBPB,512*sizeof(uint8_t));
     //std::cerr << "BPB_RsvdSecCnt = " << *(uint16_t *)(BPB_DATA + 13) << std::endl; //debugger
     //MachineSuspendSignals(&sigstate);
-
-    char oem[9];
-    memcpy(oem,BPB_DATA+3,8);
-    BPBinfo.OEM = string(oem,8);
-    char systype[8];
-    memcpy(systype, BPB_DATA+54,8);
-    BPBinfo.fileSysType = string(systype,8);
-    BPBinfo.volumeID = *(uint32_t *)(BPB_DATA + 39);
-    BPBinfo.bytesPerSector = *(uint16_t *)(BPB_DATA + 11);
-    BPBinfo.sectorsPerTrack = *(uint16_t *)(BPB_DATA + 24);
-    BPBinfo.sectorsPerCluster =(int)(*(uint8_t *)(BPB_DATA + 13));
-    BPBinfo.reservedSectorCount = *(uint16_t *)(BPB_DATA + 14);
-    BPBinfo.numberOfFats = *(uint16_t*)(BPB_DATA + 16);
-    BPBinfo.fatSize16 = *(uint16_t*)(BPB_DATA + 22);
-    BPBinfo.totalSector32 = *(uint32_t*)(BPB_DATA + 32);
-    BPBinfo.heads = *(uint16_t*)(BPB_DATA + 26);
-    BPBinfo.media = *(uint8_t*)(BPB_DATA + 21);
-    BPBinfo.firstRootSector = BPBinfo.reservedSectorCount + BPBinfo.numberOfFats * BPBinfo.fatSize16;
-    BPBinfo.rootEntryCount = *(uint16_t*)(BPB_DATA + 17);
-    BPBinfo.rootDirectorySectors = (BPBinfo.rootEntryCount * 32) / 512;
-
-    BPBinfo.firstDataSector = BPBinfo.firstRootSector + BPBinfo.rootDirectorySectors;
-
-    BPBinfo.clusterCount = ( BPBinfo.totalSector32 - BPBinfo.firstDataSector)/ BPBinfo.sectorsPerCluster;
-
+    initializeBPB();
     printBPBinfo();
 
     // seek to where FAT is 
@@ -402,7 +378,7 @@ TVMStatus VMStart(int tickms, TVMMemorySize heapsize, TVMMemorySize sharedsize, 
     VMMemoryPoolAllocate((TVMMemoryPoolID)0,512,&memoryPoolFAT);
     unsigned int readBytes = BPBinfo.clusterCount;
     int byteslimit = 512; 
-       // read FAT
+    // read FAT
     uint16_t FAT[BPBinfo.clusterCount];
     void* data = malloc(BPBinfo.clusterCount*sizeof(uint16_t));
     int sizeRead = 0; 
@@ -446,14 +422,14 @@ TVMStatus VMStart(int tickms, TVMMemorySize heapsize, TVMMemorySize sharedsize, 
     memcpy(rootDirData,readData,(BPBinfo.rootEntryCount)*32*sizeof(uint16_t));
     //cout << "total read: " << readTotal << endl;
     //cout << "entries: " << *BPB_RootEntCnt << endl;
-  
+
     //std::cerr << "name = " << *(uint8_t *)(readData ) << std::endl; //debugger
 
     cout << endl;
 
 
 
-    
+
 
 
 
@@ -473,7 +449,7 @@ TVMStatus VMStart(int tickms, TVMMemorySize heapsize, TVMMemorySize sharedsize, 
 
 
 
-    //the base and size of the memory array are specified by base and size respectively
+  //the base and size of the memory array are specified by base and size respectively
   //the memory pool identifier is put into the TVMMemoryPoolIDRef memory
   //upon successful creation, return VM_STATUS_SUCCESS
   //if the base or memory are NULL,or size is 0, return VM_STATUS_ERROR_INVALID_PARAMETER
@@ -484,7 +460,7 @@ TVMStatus VMStart(int tickms, TVMMemorySize heapsize, TVMMemorySize sharedsize, 
     //else
     //create memory in memorypools
     //cout << "\nCreating Memory Pool\n";
-        //cout << "Size: " << NEWBLOCK->size << endl;
+    //cout << "Size: " << NEWBLOCK->size << endl;
     MemPool* NEWPOOL = new MemPool;
     //cout << "ID: " << memoryPoolCount << endl;
     *memory = memoryPoolCount;
@@ -606,7 +582,7 @@ TVMStatus VMStart(int tickms, TVMMemorySize heapsize, TVMMemorySize sharedsize, 
         //push OLD BLOCK forward, and size = size minus length
         (*FREE_BLOCKS)[i].beginPtr = NEWBASE + SIZE_NEEDED;
         (*FREE_BLOCKS)[i].size = (*FREE_BLOCKS)[i].size - SIZE_NEEDED;
-        
+
         CURRENT_MEMORY_POOL->memoryAvailable = CURRENT_MEMORY_POOL->memoryAvailable - SIZE_NEEDED;
         return VM_STATUS_SUCCESS;
       }
@@ -634,18 +610,18 @@ TVMStatus VMStart(int tickms, TVMMemorySize heapsize, TVMMemorySize sharedsize, 
     void* BEGINNING_OF_USED_BLOCK;
     // void* LOOK_AHEAD_POINTER;
     bool deallocateAll = false;
-        //cout << "Number of free blocks: " << (FREE_BLOCKS)->size() << endl;
-        unsigned int totalfree = 0;
-        for(int m = 0; m < NUMBER_OF_FREE_BLOCKS; m++){
-          totalfree += (*FREE_BLOCKS)[m].size;
-        }
-        //cout << "Total size of free blocks: " << totalfree << endl;
-        //cout << "Number of used blocks: " << (USED_BLOCKS)->size() << endl;
-        unsigned int totalused = 0;
-        for(int m = 0; m < NUMBER_OF_USED_BLOCKS; m++){
-          totalused += (*USED_BLOCKS)[m].size;
-        }
-        //cout << "Total size of used blocks: " << totalused << endl;
+    //cout << "Number of free blocks: " << (FREE_BLOCKS)->size() << endl;
+    unsigned int totalfree = 0;
+    for(int m = 0; m < NUMBER_OF_FREE_BLOCKS; m++){
+      totalfree += (*FREE_BLOCKS)[m].size;
+    }
+    //cout << "Total size of free blocks: " << totalfree << endl;
+    //cout << "Number of used blocks: " << (USED_BLOCKS)->size() << endl;
+    unsigned int totalused = 0;
+    for(int m = 0; m < NUMBER_OF_USED_BLOCKS; m++){
+      totalused += (*USED_BLOCKS)[m].size;
+    }
+    //cout << "Total size of used blocks: " << totalused << endl;
 
     //scan used blocks for "pointer" to deallocate
     for(int i = 0; i < NUMBER_OF_USED_BLOCKS; i++){
@@ -688,30 +664,30 @@ TVMStatus VMStart(int tickms, TVMMemorySize heapsize, TVMMemorySize sharedsize, 
       //CURRENT_MEMORY_POOL->availableMemory += ((MemoryChunk*)pointer)->size();
     }
     /*
-    for(int i = 0; i < NUMBER_OF_FREE_BLOCKS; i++){
-      void* CURRENTBASE = (*FREE_BLOCKS)[i].beginPtr;
-      MemoryChunk *FREE_BLOCK = &((*FREE_BLOCKS)[i]);
-      void* BEGINNING_OF_USED_BLOCK = (*USED_BLOCKS)[i].beginPtr;
+       for(int i = 0; i < NUMBER_OF_FREE_BLOCKS; i++){
+       void* CURRENTBASE = (*FREE_BLOCKS)[i].beginPtr;
+       MemoryChunk *FREE_BLOCK = &((*FREE_BLOCKS)[i]);
+       void* BEGINNING_OF_USED_BLOCK = (*USED_BLOCKS)[i].beginPtr;
 
 
-      if(CURRENTBASE = 
-    } */
-    
+       if(CURRENTBASE = 
+       } */
+
     NUMBER_OF_FREE_BLOCKS = FREE_BLOCKS->size();
     NUMBER_OF_USED_BLOCKS = USED_BLOCKS->size();
     totalfree = 0;
     //cout << "Number of free blocks: " << (FREE_BLOCKS)->size() << endl;
-        for(int m = 0; m < NUMBER_OF_FREE_BLOCKS; m++){
-          totalfree += (*FREE_BLOCKS)[m].size;
-        }
-        //cout << "Total size of free blocks: " << totalfree << endl;
-        //cout << "Number of used blocks: " << (USED_BLOCKS)->size() << endl;
-        totalused = 0;
-        
-        for(int m = 0; m < NUMBER_OF_USED_BLOCKS; m++){
-          totalused += (*USED_BLOCKS)[m].size;
-        }
-        //cout << "Total size of used blocks: " << totalused << endl;
+    for(int m = 0; m < NUMBER_OF_FREE_BLOCKS; m++){
+      totalfree += (*FREE_BLOCKS)[m].size;
+    }
+    //cout << "Total size of free blocks: " << totalfree << endl;
+    //cout << "Number of used blocks: " << (USED_BLOCKS)->size() << endl;
+    totalused = 0;
+
+    for(int m = 0; m < NUMBER_OF_USED_BLOCKS; m++){
+      totalused += (*USED_BLOCKS)[m].size;
+    }
+    //cout << "Total size of used blocks: " << totalused << endl;
 
     //cout << endl;
     return VM_STATUS_SUCCESS;
@@ -1047,78 +1023,106 @@ TVMStatus VMStart(int tickms, TVMMemorySize heapsize, TVMMemorySize sharedsize, 
   }
 
 
-TVMStatus VMDirectoryOpen(const char *dirname, int *dirdescriptor){
-  if(dirname == NULL || dirdescriptor == NULL){
-    return VM_STATUS_ERROR_INVALID_PARAMETER;
-  }
-  // open directory specified by dirname
+  TVMStatus VMDirectoryOpen(const char *dirname, int *dirdescriptor){
+    if(dirname == NULL || dirdescriptor == NULL){
+      return VM_STATUS_ERROR_INVALID_PARAMETER;
+    }
+    // open directory specified by dirname
 
-  // newly open directory will be placed in the location specified by dirdescriptor
+    // newly open directory will be placed in the location specified by dirdescriptor
 
-  return VM_STATUS_SUCCESS;
-}
-
-TVMStatus VMDirectoryClose(int dirdescriptor){
-  // closes a directory previously opened 
     return VM_STATUS_SUCCESS;
-}
-TVMStatus VMDirectoryRead(int dirdescriptor, SVMDirectoryEntryRef dirent){
-  if(dirent == NULL ){
-    return VM_STATUS_ERROR_INVALID_PARAMETER;
   }
-  // attempts to read the next directory entry into the location specified by dirent from the file specfied by dirdescriptor
 
-  // dirdescriptor should have been obtained by a previous call to VMDirectoryOpen()
-
-  // block if not completed
-  return VM_STATUS_SUCCESS;
-}
-
-TVMStatus VMDirectoryRewind(int dirdescriptor){
-
-  // attempts to rewind the directory specified by dirdescriptor to the beginning
-
-  // The dirdescriptor should have been otained by a previous call to VMDirectoryOpen()
-
-  // block if not completed
-  return VM_STATUS_SUCCESS;
-}
-
-TVMStatus VMDirectoryCurrent(char *abspath){
-  if(abspath == NULL){
-    return VM_STATUS_ERROR_INVALID_PARAMETER;
+  TVMStatus VMDirectoryClose(int dirdescriptor){
+    // closes a directory previously opened 
+    return VM_STATUS_SUCCESS;
   }
-  // place the absolute path of the current working directory in the location specifiec by abspath
-  return VM_STATUS_SUCCESS;
-}
+  TVMStatus VMDirectoryRead(int dirdescriptor, SVMDirectoryEntryRef dirent){
+    if(dirent == NULL ){
+      return VM_STATUS_ERROR_INVALID_PARAMETER;
+    }
+    // attempts to read the next directory entry into the location specified by dirent from the file specfied by dirdescriptor
 
-TVMStatus VMDirectoryChange(const char *path){
-  if(path == NULL){
-    return VM_STATUS_ERROR_INVALID_PARAMETER;
+    // dirdescriptor should have been obtained by a previous call to VMDirectoryOpen()
+
+    // block if not completed
+    return VM_STATUS_SUCCESS;
   }
-  // changes the current working directory of the mounted FAT file system to the name specified by path
-  return VM_STATUS_SUCCESS;
-}
 
-TVMStatus VMDirectoryCreate(const char *dirname){
-  if(dirname == NULL){
-    return VM_STATUS_ERROR_INVALID_PARAMETER;
+  TVMStatus VMDirectoryRewind(int dirdescriptor){
+
+    // attempts to rewind the directory specified by dirdescriptor to the beginning
+
+    // The dirdescriptor should have been otained by a previous call to VMDirectoryOpen()
+
+    // block if not completed
+    return VM_STATUS_SUCCESS;
   }
-  // creates a directory in the mounted FAT file system specified by dirname
-  return VM_STATUS_SUCCESS;
-}
 
-TVMStatus VMDirectoryUnlink(const char *path){
-  if(path == NULL){
-    return VM_STATUS_ERROR_INVALID_PARAMETER;
+  TVMStatus VMDirectoryCurrent(char *abspath){
+    if(abspath == NULL){
+      return VM_STATUS_ERROR_INVALID_PARAMETER;
+    }
+    // place the absolute path of the current working directory in the location specifiec by abspath
+    return VM_STATUS_SUCCESS;
   }
-  // attempts to remove the file or directory specified by path from the  mounted FAT file system
 
-  // VMDirectoryUnlink() will fail if the file or directory is current 
-  // opened, or if the directory attempting to be unlinked is a parent of an open file or directory
-  return VM_STATUS_SUCCESS;
-}
+  TVMStatus VMDirectoryChange(const char *path){
+    if(path == NULL){
+      return VM_STATUS_ERROR_INVALID_PARAMETER;
+    }
+    // changes the current working directory of the mounted FAT file system to the name specified by path
+    return VM_STATUS_SUCCESS;
+  }
+
+  TVMStatus VMDirectoryCreate(const char *dirname){
+    if(dirname == NULL){
+      return VM_STATUS_ERROR_INVALID_PARAMETER;
+    }
+    // creates a directory in the mounted FAT file system specified by dirname
+    return VM_STATUS_SUCCESS;
+  }
+
+  TVMStatus VMDirectoryUnlink(const char *path){
+    if(path == NULL){
+      return VM_STATUS_ERROR_INVALID_PARAMETER;
+    }
+    // attempts to remove the file or directory specified by path from the  mounted FAT file system
+
+    // VMDirectoryUnlink() will fail if the file or directory is current 
+    // opened, or if the directory attempting to be unlinked is a parent of an open file or directory
+    return VM_STATUS_SUCCESS;
+  }
 
 
+void initializeBPB(){
+    char oem[9];
+    memcpy(oem,BPB_DATA+3,8);
+    BPBinfo.OEM = string(oem,8);
+    char systype[8];
+    memcpy(systype, BPB_DATA+54,8);
+    BPBinfo.fileSysType = string(systype,8);
+    BPBinfo.volumeID = *(uint32_t *)(BPB_DATA + 39);
+    BPBinfo.bytesPerSector = *(uint16_t *)(BPB_DATA + 11);
+    BPBinfo.sectorsPerTrack = *(uint16_t *)(BPB_DATA + 24);
+    BPBinfo.sectorsPerCluster =(int)(*(uint8_t *)(BPB_DATA + 13));
+    BPBinfo.reservedSectorCount = *(uint16_t *)(BPB_DATA + 14);
+    BPBinfo.numberOfFats = *(uint16_t*)(BPB_DATA + 16);
+    BPBinfo.fatSize16 = *(uint16_t*)(BPB_DATA + 22);
+    BPBinfo.totalSector32 = *(uint32_t*)(BPB_DATA + 32);
+    BPBinfo.heads = *(uint16_t*)(BPB_DATA + 26);
+    BPBinfo.media = *(uint8_t*)(BPB_DATA + 21);
+    BPBinfo.firstRootSector = BPBinfo.reservedSectorCount + BPBinfo.numberOfFats * BPBinfo.fatSize16;
+    BPBinfo.rootEntryCount = *(uint16_t*)(BPB_DATA + 17);
+    BPBinfo.rootDirectorySectors = (BPBinfo.rootEntryCount * 32) / 512;
+
+    BPBinfo.firstDataSector = BPBinfo.firstRootSector + BPBinfo.rootDirectorySectors;
+
+    BPBinfo.clusterCount = ( BPBinfo.totalSector32 - BPBinfo.firstDataSector)/ BPBinfo.sectorsPerCluster;
+
+
+
+  }
 
 } 
