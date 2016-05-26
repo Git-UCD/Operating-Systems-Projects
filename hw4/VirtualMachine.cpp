@@ -368,7 +368,7 @@ extern "C" {
     printBPBinfo();
 
     // seek to where FAT is 
-    MachineFileSeek(fd,512,0,fileSeekCallback,currentThread);
+    MachineFileSeek(fd,512,SEEK_SET,fileSeekCallback,currentThread);
     threadSchedule();
     int newoffset = currentThread->result;
     //cout << "newoffset: " << newoffset << endl;
@@ -376,25 +376,26 @@ extern "C" {
     // using shared memory
     void* memoryPoolFAT;
     VMMemoryPoolAllocate((TVMMemoryPoolID)0,512,&memoryPoolFAT);
-    unsigned int readBytes = BPBinfo.clusterCount;
+    unsigned int readBytes = 17*512; // BPBinfo.clusterCount;
     int byteslimit = 512; 
     // read FAT
-    uint16_t FAT[BPBinfo.clusterCount];
-    void* data = malloc(BPBinfo.clusterCount*sizeof(uint16_t));
+    uint16_t FAT[17*512];//[BPBinfo.clusterCount];
+    void* data = malloc(17*512*sizeof(uint16_t ));//(BPBinfo.clusterCount*sizeof(uint16_t));
     int sizeRead = 0; 
+   // cout << "filedescriptor" << fd << endl;
     while(readBytes>0){
       MachineFileRead(fd,memoryPoolFAT,byteslimit,fileReadCallback,currentThread);
       currentThread->state = VM_THREAD_STATE_WAITING;
       threadSchedule();
-      memcpy(data,memoryPoolFAT,byteslimit);
-      data += 512;
+      memcpy(FAT+sizeRead,memoryPoolFAT,byteslimit);
       readBytes = readBytes - byteslimit;
+      cout << sizeRead << endl;
       sizeRead += currentThread->result; 
     }
-
     VMMemoryPoolDeallocate((TVMMemoryPoolID)0,&memoryPoolFAT);
-    memcpy(FAT,data,BPBinfo.clusterCount);
-
+     for(int i = 0;i < 120; i++){
+       cout << hex <<*((uint16_t*)FAT+i) <<" ";
+     }
     // seek to root directory
     MachineFileSeek(fd,BPBinfo.firstRootSector*512,0,fileSeekCallback,currentThread);
     threadSchedule();
@@ -405,35 +406,22 @@ extern "C" {
     void* memoryPoolRoot;
     VMMemoryPoolAllocate((TVMMemoryPoolID)0,512,&memoryPoolRoot);
     uint16_t rootDirData[(BPBinfo.rootEntryCount)*32];
-    void* readData =  malloc( (BPBinfo.rootEntryCount)*32*sizeof(uint16_t));
     int totalBytes =  (BPBinfo.rootEntryCount)*32;
     int readTotal = 0;
+    byteslimit = 512;
     while(totalBytes>0){
       MachineFileRead(fd,memoryPoolRoot,byteslimit,fileReadCallback,currentThread);
       currentThread->state = VM_THREAD_STATE_WAITING;
       threadSchedule();
-      memcpy(readData,memoryPoolRoot,byteslimit);
-      //std::cerr << "name = " << *(uint16_t *)(memoryPoolRoot ) << std::endl; //debugger
-
-      readData += 512;
+      memcpy(rootDirData + readTotal,memoryPoolRoot,byteslimit);
       totalBytes = totalBytes - byteslimit;
       readTotal += currentThread->result;
     }
-    memcpy(rootDirData,readData,(BPBinfo.rootEntryCount)*32*sizeof(uint16_t));
-    //cout << "total read: " << readTotal << endl;
-    //cout << "entries: " << *BPB_RootEntCnt << endl;
-
-    //std::cerr << "name = " << *(uint8_t *)(readData ) << std::endl; //debugger
-
-    cout << endl;
-
-
-
-
-
-
-
-
+ 
+    char name[12];
+    memcpy(name,rootDirData,12);
+   // std::cerr << "name = " << *(uint8_t *)(rootDirData + i ) << " "; //debugger
+    
 
 
 
@@ -981,7 +969,7 @@ extern "C" {
   TVMStatus VMFileSeek(int filedescriptor, int offset, int whence, int *newoffset){
     MachineSuspendSignals(&sigstate);
     TMachineFileCallback fSeekCallback = fileSeekCallback;
-    MachineFileSeek( filedescriptor, offset, whence, fSeekCallback, currentThread);
+    MachineFileSeek( filedescriptor, offset,whence, fSeekCallback, currentThread);
     threadSchedule();
     *newoffset = currentThread->result;
     MachineResumeSignals(&sigstate);
