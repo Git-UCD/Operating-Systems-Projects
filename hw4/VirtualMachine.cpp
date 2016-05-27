@@ -141,8 +141,7 @@ extern "C" {
   vector<TCB*> sleepThreads;
   vector<Mutex*> mutexList;
 
-  // FAT 
-  vector<uint16_t> FATs;
+  
   // BPB
   BPB BPBinfo;
   void printBPBinfo(){
@@ -170,7 +169,8 @@ extern "C" {
     MachineResumeSignals(&sigstate);
   }
   uint8_t BPB_DATA[512];
-
+ // root directory
+vector< SVMDirectoryEntry > rootDirs(512);
 
 
 
@@ -394,8 +394,9 @@ extern "C" {
     }
     VMMemoryPoolDeallocate((TVMMemoryPoolID)0,&memoryPoolFAT);
      for(int i = 0;i < 120; i++){
-       cout << hex <<*((uint16_t*)FAT+i) <<" ";
+       cout << hex <<*((uint16_t*)FAT+i) << dec << " ";
      }
+    cout <<endl;
     // seek to root directory
     MachineFileSeek(fd,BPBinfo.firstRootSector*512,0,fileSeekCallback,currentThread);
     threadSchedule();
@@ -417,13 +418,46 @@ extern "C" {
       totalBytes = totalBytes - byteslimit;
       readTotal += currentThread->result;
     }
- 
-    char name[12];
-    memcpy(name,rootDirData,12);
-   // std::cerr << "name = " << *(uint8_t *)(rootDirData + i ) << " "; //debugger
     
+   // std::cerr << "name = " << *(uint8_t *)(rootDirData + i ) << " "; //debugger
+   for(int i = 0; i < rootDirs.size(); i += 31){
+      memcpy(rootDirs[i].DShortFileName,rootDirData + i ,11);
+      rootDirs[i].DShortFileName[12] = '\0';
+      rootDirs[i].DAttributes = *(char*)(rootDirData + i + 11);
+      // Create 
+      rootDirs[i].DCreate.DYear        =  *(uint8_t*)(rootDirData + i + 16);
+      rootDirs[i].DCreate.DMonth       =  *(uint8_t*)(rootDirData + i + 16);
+      rootDirs[i].DCreate.DDay         = *(uint8_t*)(rootDirData + i + 16);
+      rootDirs[i].DCreate.DHour        = *(uint8_t*)(rootDirData + i + 16);
+      rootDirs[i].DCreate.DMinute      =  *(uint8_t*)(rootDirData + i + 16);
+      rootDirs[i].DCreate.DSecond      =  *(uint8_t*)(rootDirData + i + 16);
+      rootDirs[i].DCreate.DHundredth  =  *(uint8_t*)(rootDirData + i + 13);
+      // Access
+      rootDirs[i].DAccess.DYear        =  *(uint8_t*)(rootDirData + i + 18);
+      rootDirs[i].DAccess.DMonth       =  *(uint8_t*)(rootDirData + i + 18);
+      rootDirs[i].DAccess.DDay         = *(uint8_t*)(rootDirData + i + 18);
+      rootDirs[i].DAccess.DHour        = *(uint8_t*)(rootDirData + i + 18);
+      rootDirs[i].DAccess.DMinute      =  *(uint8_t*)(rootDirData + i + 18);
+      rootDirs[i].DAccess.DSecond      =  *(uint8_t*)(rootDirData + i + 18);
+      rootDirs[i].DAccess.DHundredth  =  *(uint8_t*)(rootDirData + i + 13);
+      //modify 
+      rootDirs[i].DModify.DYear   =  *(uint8_t*)(rootDirData + i + 24);
+      rootDirs[i].DModify.DMonth  =  *(uint8_t*)(rootDirData + i + 24);
+      rootDirs[i].DModify.DDay    =  *(uint8_t*)(rootDirData + i + 24);
+      rootDirs[i].DModify.DHour   =  *(uint8_t*)(rootDirData + i + 22);
+      rootDirs[i].DModify.DMinute =  *(uint8_t*)(rootDirData + i + 22);
+      rootDirs[i].DModify.DSecond =  *(uint8_t*)(rootDirData + i + 22);
+      rootDirs[i].DModify.DHundredth =  *(uint8_t*)(rootDirData + i + 13);
 
 
+      rootDirs[i].DSize = *(uint8_t*)(rootDirData + i + 28);	
+   } 
+   cout << rootDirs.size() << endl;
+   for(int i = 0; i < rootDirs.size(); i++){ 
+       string str( rootDirs[i].DShortFileName , strlen(rootDirs[i].DShortFileName));
+       if( str.length() > 1 )
+          cout << str << endl;
+   }
 
 
 
@@ -1082,7 +1116,6 @@ extern "C" {
     // opened, or if the directory attempting to be unlinked is a parent of an open file or directory
     return VM_STATUS_SUCCESS;
   }
-
 
 void initializeBPB(){
     char oem[9];
