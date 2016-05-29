@@ -18,7 +18,7 @@ extern "C" {
   void fileSeekCallback(void* thread ,int result);
   void fileReadCallback(void* thread ,int result);
   void initializeBPB();
-
+  void initializeDirectory(uint8_t rootDirData[]);   
 
 
 #define VM_THREAD_PRIORITY_IDLE                 ((TVMThreadPriority)0x00)
@@ -141,7 +141,7 @@ extern "C" {
   vector<TCB*> sleepThreads;
   vector<Mutex*> mutexList;
 
-  
+
   // BPB
   BPB BPBinfo;
   void printBPBinfo(){
@@ -169,8 +169,8 @@ extern "C" {
     MachineResumeSignals(&sigstate);
   }
   uint8_t BPB_DATA[512];
- // root directory
-vector< SVMDirectoryEntry > rootDirs(512);
+  // root directory
+  vector< SVMDirectoryEntry > rootDirs(512);
 
 
 
@@ -365,7 +365,8 @@ vector< SVMDirectoryEntry > rootDirs(512);
     //std::cerr << "BPB_RsvdSecCnt = " << *(uint16_t *)(BPB_DATA + 13) << std::endl; //debugger
     //MachineSuspendSignals(&sigstate);
     initializeBPB();
-    printBPBinfo();
+    /////////////////////////////////////////////////////////////////////
+    //printBPBinfo();
 
     // seek to where FAT is 
     MachineFileSeek(fd,512,SEEK_SET,fileSeekCallback,currentThread);
@@ -380,9 +381,8 @@ vector< SVMDirectoryEntry > rootDirs(512);
     int byteslimit = 512; 
     // read FAT
     uint16_t FAT[17*512];//[BPBinfo.clusterCount];
-    void* data = malloc(17*512*sizeof(uint16_t ));//(BPBinfo.clusterCount*sizeof(uint16_t));
     int sizeRead = 0; 
-   // cout << "filedescriptor" << fd << endl;
+    // cout << "filedescriptor" << fd << endl;
     while(readBytes>0){
       MachineFileRead(fd,memoryPoolFAT,byteslimit,fileReadCallback,currentThread);
       currentThread->state = VM_THREAD_STATE_WAITING;
@@ -392,9 +392,12 @@ vector< SVMDirectoryEntry > rootDirs(512);
       sizeRead += currentThread->result; 
     }
     VMMemoryPoolDeallocate((TVMMemoryPoolID)0,&memoryPoolFAT);
-     for(int i = 0;i < 120; i++){
-       cout << hex <<*((uint16_t*)FAT+i) << dec << " ";
-     }
+    ////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    /* //Print FAT
+    for(int i = 0;i < 120; i++){
+      cout << hex <<*((uint16_t*)FAT+i) << dec << " ";
+    }
+    */
     cout <<endl;
     // seek to root directory
     MachineFileSeek(fd,BPBinfo.firstRootSector*512,0,fileSeekCallback,currentThread);
@@ -417,61 +420,7 @@ vector< SVMDirectoryEntry > rootDirs(512);
       totalBytes = totalBytes - byteslimit;
       readTotal += currentThread->result;
     }
-   
-   for(int i = 0; i < rootDirs.size(); i += 32){
-      memcpy(rootDirs[i].DShortFileName,rootDirData + i ,11);
-      rootDirs[i].DShortFileName[12] = '\0';
-      rootDirs[i].DAttributes = *(char*)(rootDirData + i + 11);
-      // Create 
-      rootDirs[i].DCreate.DYear        = ( (*(uint16_t*)(rootDirData + i + 16) & 0xFE00) >> 9) + 1980 ;// bits 9-15
-      rootDirs[i].DCreate.DMonth       = ( *(uint8_t*)(rootDirData + i + 16) & 0x1E0) >> 5; // bits 5-8
-      rootDirs[i].DCreate.DDay         = *(uint16_t*)(rootDirData + i + 16) & 0x1F;          // bits 0-4
-      rootDirs[i].DCreate.DHour        = ( *(uint16_t*)(rootDirData + i + 14) & 0xF800)>>11;  // bits 11-15
-      rootDirs[i].DCreate.DMinute      = ( *(uint16_t*)(rootDirData + i + 14) & 0x7E0)>>5;  // bits 5-10
-      rootDirs[i].DCreate.DSecond      =  *(uint16_t*)(rootDirData + i + 14) & 0x1F;         // bits 0-4
-      rootDirs[i].DCreate.DHundredth  =  *(uint8_t*)(rootDirData + i + 13);
-      // Access
-      rootDirs[i].DAccess.DYear        =( ( *(uint16_t*)(rootDirData + i + 18)& 0xFE00) >> 9) + 1980 ;// bits 9-15
-      rootDirs[i].DAccess.DMonth       = ( *(uint16_t*)(rootDirData + i + 18) & 0x1E0) >> 5; // bits 5-8
-      rootDirs[i].DAccess.DDay         = *(uint16_t*)(rootDirData + i + 18) & 0x1F;          // bits 0-4
-      //modify 
-      rootDirs[i].DModify.DYear   =  *(uint8_t*)(rootDirData + i + 24);
-      rootDirs[i].DModify.DMonth  =  *(uint8_t*)(rootDirData + i + 24);
-      rootDirs[i].DModify.DDay    =  *(uint8_t*)(rootDirData + i + 24);
-      rootDirs[i].DModify.DHour   =  *(uint8_t*)(rootDirData + i + 22);
-      rootDirs[i].DModify.DMinute =  *(uint8_t*)(rootDirData + i + 22);
-      rootDirs[i].DModify.DSecond =  *(uint8_t*)(rootDirData + i + 22);
-      rootDirs[i].DModify.DHundredth =  *(uint8_t*)(rootDirData + i + 13);
-
-
-      rootDirs[i].DSize = *(uint16_t*)(rootDirData + i + 28);	
-   } 
-   cout << "DATE and TIME created " << endl;
-   for(int i = 0; i < rootDirs.size(); i++){
-      if( (strlen( rootDirs[i].DShortFileName) > 1) && (rootDirs[i].DCreate.DYear > 1980) && (rootDirs[i].DCreate.DYear < 2107) ){
-        cout << rootDirs[i].DCreate.DYear << "/" << (int) rootDirs[i].DCreate.DMonth << "/" <<(int) rootDirs[i].DCreate.DDay << " " << (int)rootDirs[i].DCreate.DHour << ":" << (int)rootDirs[i].DCreate.DMinute;
-        cout << "   " <<(uint16_t) rootDirs[i].DSize << " ";
-        cout << rootDirs[i].DShortFileName << endl;
-      }
-   }
- cout << endl;
- cout << "DATE and TIME modify " << endl;
- for(int i = 0; i < rootDirs.size(); i++){
-     if( strlen(rootDirs[i].DShortFileName) > 1  && (rootDirs[i].DCreate.DYear > 1980) && (rootDirs[i].DCreate.DYear < 2107)  ){
-        cout << rootDirs[i].DModify.DYear << "/" << (int) rootDirs[i].DModify.DMonth << "/" <<(int) rootDirs[i].DModify.DDay << " " << (int)rootDirs[i].DModify.DHour << ":" << (int)rootDirs[i].DModify.DMinute;
-        cout << "   " <<(uint16_t) rootDirs[i].DSize << " ";
-        cout << rootDirs[i].DShortFileName << endl;
-       //         cout << endl;
-       
-        }
-  }
-cout << endl; 
-cout << "DATA and TIME Access " << endl;
-for(int i = 0; i < rootDirs.size(); i++ ){
-   if( strlen(rootDirs[i].DShortFileName)  && (rootDirs[i].DCreate.DYear > 1980) && (rootDirs[i].DCreate.DYear < 2107) ){
-     cout << rootDirs[i].DAccess.DYear << "/" << (int) rootDirs[i].DAccess.DMonth << "/" << (int)rootDirs[i].DAccess.DDay << endl;
-   }
-}
+    initializeDirectory(rootDirData);   
 
     mainEntry(argc,argv);
 
@@ -1127,7 +1076,7 @@ for(int i = 0; i < rootDirs.size(); i++ ){
     return VM_STATUS_SUCCESS;
   }
 
-void initializeBPB(){
+  void initializeBPB(){
     char oem[9];
     memcpy(oem,BPB_DATA+3,8);
     BPBinfo.OEM = string(oem,8);
@@ -1154,6 +1103,64 @@ void initializeBPB(){
 
 
 
+  }
+  void initializeDirectory(uint8_t rootDirData[]){
+    for(int i = 0; i < rootDirs.size(); i += 32){
+      memcpy(rootDirs[i].DShortFileName,rootDirData + i ,11);
+      rootDirs[i].DShortFileName[12] = '\0';
+      rootDirs[i].DAttributes = *(char*)(rootDirData + i + 11);
+      // Create 
+      rootDirs[i].DCreate.DYear        = ( (*(uint16_t*)(rootDirData + i + 16) & 0xFE00) >> 9) + 1980 ;// bits 9-15
+      rootDirs[i].DCreate.DMonth       = ( *(uint8_t*)(rootDirData + i + 16) & 0x1E0) >> 5; // bits 5-8
+      rootDirs[i].DCreate.DDay         = *(uint16_t*)(rootDirData + i + 16) & 0x1F;          // bits 0-4
+      rootDirs[i].DCreate.DHour        = ( *(uint16_t*)(rootDirData + i + 14) & 0xF800)>>11;  // bits 11-15
+      rootDirs[i].DCreate.DMinute      = ( *(uint16_t*)(rootDirData + i + 14) & 0x7E0)>>5;  // bits 5-10
+      rootDirs[i].DCreate.DSecond      =  *(uint16_t*)(rootDirData + i + 14) & 0x1F;         // bits 0-4
+      rootDirs[i].DCreate.DHundredth  =  *(uint8_t*)(rootDirData + i + 13);
+      // Access
+      rootDirs[i].DAccess.DYear        =( ( *(uint16_t*)(rootDirData + i + 18)& 0xFE00) >> 9) + 1980 ;// bits 9-15
+      rootDirs[i].DAccess.DMonth       = ( *(uint16_t*)(rootDirData + i + 18) & 0x1E0) >> 5; // bits 5-8
+      rootDirs[i].DAccess.DDay         = *(uint16_t*)(rootDirData + i + 18) & 0x1F;          // bits 0-4
+      //modify 
+      rootDirs[i].DModify.DYear   =  (*(uint8_t*)(rootDirData + i + 24) & 0xFE00) >> 9;
+      rootDirs[i].DModify.DMonth  =  (*(uint8_t*)(rootDirData + i + 24) & 0x1E0) >> 5;
+      rootDirs[i].DModify.DDay    =  *(uint8_t*)(rootDirData + i + 24) & 0x1F;
+      rootDirs[i].DModify.DHour   =  (*(uint8_t*)(rootDirData + i + 22) & 0xF800) >> 11;
+      rootDirs[i].DModify.DMinute =  (*(uint8_t*)(rootDirData + i + 22) & 0x7E0) >> 5;
+      rootDirs[i].DModify.DSecond =  *(uint8_t*)(rootDirData + i + 22) & 0x1F;
+      rootDirs[i].DModify.DHundredth =  *(uint8_t*)(rootDirData + i + 13);
+
+
+      rootDirs[i].DSize = *(uint16_t*)(rootDirData + i + 28);	
+    } 
+    /*
+    cout << "DATE and TIME created " << endl;
+    for(int i = 0; i < rootDirs.size(); i++){
+      if( (strlen( rootDirs[i].DShortFileName) > 1) && (rootDirs[i].DCreate.DYear > 1980) && (rootDirs[i].DCreate.DYear < 2107) ){
+        cout << rootDirs[i].DCreate.DYear << "/" << (int) rootDirs[i].DCreate.DMonth << "/" <<(int) rootDirs[i].DCreate.DDay << " " << (int)rootDirs[i].DCreate.DHour << ":" << (int)rootDirs[i].DCreate.DMinute;
+        cout << "   " <<(uint16_t) rootDirs[i].DSize << " ";
+        cout << rootDirs[i].DShortFileName << endl;
+      }
+    }
+    cout << endl;
+    cout << "DATE and TIME modify " << endl;
+    for(int i = 0; i < rootDirs.size(); i++){
+      if( strlen(rootDirs[i].DShortFileName) > 1  && (rootDirs[i].DCreate.DYear > 1980) && (rootDirs[i].DCreate.DYear < 2107)  ){
+        cout << rootDirs[i].DModify.DYear << "/" << (int) rootDirs[i].DModify.DMonth << "/" <<(int) rootDirs[i].DModify.DDay << " " << (int)rootDirs[i].DModify.DHour << ":" << (int)rootDirs[i].DModify.DMinute;
+        cout << "   " <<(uint16_t) rootDirs[i].DSize << " ";
+        cout << rootDirs[i].DShortFileName << endl;
+        //         cout << endl;
+
+      }
+    }
+    cout << endl; 
+    cout << "DATA and TIME Access " << endl;
+    for(int i = 0; i < rootDirs.size(); i++ ){
+      if( strlen(rootDirs[i].DShortFileName)  && (rootDirs[i].DCreate.DYear > 1980) && (rootDirs[i].DCreate.DYear < 2107) ){
+        cout << rootDirs[i].DAccess.DYear << "/" << (int) rootDirs[i].DAccess.DMonth << "/" << (int)rootDirs[i].DAccess.DDay << endl;
+      }
+    }
+    */
   }
 
 } 
