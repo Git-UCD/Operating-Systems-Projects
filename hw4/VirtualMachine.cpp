@@ -1009,7 +1009,8 @@ extern "C" {
       return VM_STATUS_ERROR_INVALID_PARAMETER;
     }
     // open directory specified by dirname
-
+//    for(int i = 0; i < 512; i++){
+    
     // newly open directory will be placed in the location specified by dirdescriptor
 
     return VM_STATUS_SUCCESS;
@@ -1105,10 +1106,28 @@ extern "C" {
 
   }
   void initializeDirectory(uint8_t rootDirData[]){
+   //char str[12];
+   //memcpy(str,rootDirData + 32 + 1, 11);
+   //str[ 12] = '\0';
+  // cout << str << endl;
+   // cout << *(char*)(rootDirData ) << endl;
+    for(int i = 0; i < 512; i++){
+      // if(i == 32 || i == 96 || i ==  160 || i == 224 ) 
+       cout << i << ": " << *(uint8_t *)(rootDirData + i ) << " " << endl;
+       // int k = 1;
+       // for(int j = 0; j < 5; j++ ){
+       //  rootDirs[i].DLongFileName[j] = *( (char*)rootDirData + i + k);
+       //  k += 2;
+       // }
+       //if(!( i % 32) )
+       cout << endl;
+    }
+    cout << endl;
     for(int i = 0; i < rootDirs.size(); i += 32){
       memcpy(rootDirs[i].DShortFileName,rootDirData + i ,11);
       rootDirs[i].DShortFileName[12] = '\0';
       rootDirs[i].DAttributes = *(char*)(rootDirData + i + 11);
+     
       // Create 
       rootDirs[i].DCreate.DYear        = ( (*(uint16_t*)(rootDirData + i + 16) & 0xFE00) >> 9) + 1980 ;// bits 9-15
       rootDirs[i].DCreate.DMonth       = ( *(uint8_t*)(rootDirData + i + 16) & 0x1E0) >> 5; // bits 5-8
@@ -1133,34 +1152,35 @@ extern "C" {
 
       rootDirs[i].DSize = *(uint16_t*)(rootDirData + i + 28);	
     } 
-    /*
+    
     cout << "DATE and TIME created " << endl;
     for(int i = 0; i < rootDirs.size(); i++){
-      if( (strlen( rootDirs[i].DShortFileName) > 1) && (rootDirs[i].DCreate.DYear > 1980) && (rootDirs[i].DCreate.DYear < 2107) ){
-        cout << rootDirs[i].DCreate.DYear << "/" << (int) rootDirs[i].DCreate.DMonth << "/" <<(int) rootDirs[i].DCreate.DDay << " " << (int)rootDirs[i].DCreate.DHour << ":" << (int)rootDirs[i].DCreate.DMinute;
-        cout << "   " <<(uint16_t) rootDirs[i].DSize << " ";
-        cout << rootDirs[i].DShortFileName << endl;
+     if( (strlen( rootDirs[i].DShortFileName) > 1) && (rootDirs[i].DCreate.DYear > 1980) && (rootDirs[i].DCreate.DYear < 2107) ){
+       // cout << rootDirs[i].DCreate.DYear << "/" << (int) rootDirs[i].DCreate.DMonth << "/" <<(int) rootDirs[i].DCreate.DDay << " " << (int)rootDirs[i].DCreate.DHour << ":" << (int)rootDirs[i].DCreate.DMinute;
+       // cout << "   " <<(uint16_t) rootDirs[i].DSize << " ";
+      //  cout << rootDirs[i].DShortFileName << endl;
+        cout <<  "long: " << rootDirs[i].DLongFileName << endl;
       }
     }
     cout << endl;
-    cout << "DATE and TIME modify " << endl;
-    for(int i = 0; i < rootDirs.size(); i++){
-      if( strlen(rootDirs[i].DShortFileName) > 1  && (rootDirs[i].DCreate.DYear > 1980) && (rootDirs[i].DCreate.DYear < 2107)  ){
-        cout << rootDirs[i].DModify.DYear << "/" << (int) rootDirs[i].DModify.DMonth << "/" <<(int) rootDirs[i].DModify.DDay << " " << (int)rootDirs[i].DModify.DHour << ":" << (int)rootDirs[i].DModify.DMinute;
-        cout << "   " <<(uint16_t) rootDirs[i].DSize << " ";
-        cout << rootDirs[i].DShortFileName << endl;
-        //         cout << endl;
+    // cout << "DATE and TIME modify " << endl;
+    // for(int i = 0; i < rootDirs.size(); i++){
+    //   if( strlen(rootDirs[i].DShortFileName) > 1  && (rootDirs[i].DCreate.DYear > 1980) && (rootDirs[i].DCreate.DYear < 2107)  ){
+    //     cout << rootDirs[i].DModify.DYear << "/" << (int) rootDirs[i].DModify.DMonth << "/" <<(int) rootDirs[i].DModify.DDay << " " << (int)rootDirs[i].DModify.DHour << ":" << (int)rootDirs[i].DModify.DMinute;
+    //     cout << "   " <<(uint16_t) rootDirs[i].DSize << " ";
+    //     cout << rootDirs[i].DShortFileName << endl;
+    //     //         cout << endl;
 
-      }
-    }
-    cout << endl; 
-    cout << "DATA and TIME Access " << endl;
-    for(int i = 0; i < rootDirs.size(); i++ ){
-      if( strlen(rootDirs[i].DShortFileName)  && (rootDirs[i].DCreate.DYear > 1980) && (rootDirs[i].DCreate.DYear < 2107) ){
-        cout << rootDirs[i].DAccess.DYear << "/" << (int) rootDirs[i].DAccess.DMonth << "/" << (int)rootDirs[i].DAccess.DDay << endl;
-      }
-    }
-    */
+    //   }
+    // }
+  //   cout << endl; 
+  //   cout << "DATA and TIME Access " << endl;
+  //   for(int i = 0; i < rootDirs.size(); i++ ){
+  //     if( strlen(rootDirs[i].DShortFileName)  && (rootDirs[i].DCreate.DYear > 1980) && (rootDirs[i].DCreate.DYear < 2107) ){
+  //       cout << rootDirs[i].DAccess.DYear << "/" << (int) rootDirs[i].DAccess.DMonth << "/" << (int)rootDirs[i].DAccess.DDay << endl;
+  //     }
+  //   }
+    
   }
 
 } 
