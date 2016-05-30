@@ -20,6 +20,7 @@ extern "C" {
   void initializeBPB();
   void initializeDirectory(uint8_t rootDirData[]);   
   void convertLname(char* lname);
+vector<int> getChain(int clusterEntry);
 
 #define VM_THREAD_PRIORITY_IDLE                 ((TVMThreadPriority)0x00)
   
@@ -1105,13 +1106,7 @@ extern "C" {
 
   }
   void initializeDirectory(uint8_t rootDirData[]){
-   //char str[12];
-   //memcpy(str,rootDirData + 32 + 1, 11);
-   //str[ 12] = '\0';
-  // cout << str << endl;
-   // cout << *(char*)(rootDirData ) << endl;
     for(int i = 0; i < 512; i+= 32){
-      
        int k = 1;
        if( *(uint8_t *)(rootDirData + i + 11 ) == 0xF  ){
          for(int j = 0; j < 5;j++ ){
@@ -1134,11 +1129,7 @@ extern "C" {
           // cout << "i:" << i << " j: " << j << endl;
           k += 2;
          }
-
-         //rootDirs[i].DLongFileName[] = '\0';
        }
-
-       //if(!( i % 32) )
        cout << endl;
     }
 
@@ -1213,7 +1204,6 @@ extern "C" {
   // 3
   int clusterwanted = 31;
   MachineFileSeek(fd,BPBinfo.firstDataSector*512+ 512*(clusterwanted-2)*2 ,SEEK_SET,fileSeekCallback,currentThread);
-
   threadSchedule();
   int offset = currentThread->result;
   cout <<"offset: " <<  offset << endl;
@@ -1229,6 +1219,10 @@ extern "C" {
      cout << *( (char*)sector + i )  ;  
   }
   cout << endl;
+  vector<int> chain =  getChain(29);
+  for(int i = 0; i < chain.size(); i++){
+    cout << i << ":" << chain[i] << endl;
+  }
   }
 void convertLname(char* lname ){
  int size = strlen(lname);
@@ -1258,8 +1252,16 @@ void convertLname(char* lname ){
     // cout << shortName << endl;
  }
 
-void getChain(int clusterEntry){
- // FAT
+vector<int> getChain(int clusterEntry ){
+ vector<int>clusterSet;
+ clusterSet.push_back(clusterEntry);
+ int iter  = clusterEntry;
+ while(FAT[iter] <  0xFFF8 ){
+   clusterSet.push_back(FAT[iter]);
+   iter = FAT[iter];
+ }
+return clusterSet;
+ 
 }
 
 
