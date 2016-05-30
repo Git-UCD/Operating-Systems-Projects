@@ -19,10 +19,10 @@ extern "C" {
   void fileReadCallback(void* thread ,int result);
   void initializeBPB();
   void initializeDirectory(uint8_t rootDirData[]);   
-
+  void convertLname(char* lname);
 
 #define VM_THREAD_PRIORITY_IDLE                 ((TVMThreadPriority)0x00)
-
+  
   volatile int TIMER;
   static const int HIGH = 3;
   static const int MED = 2;
@@ -132,7 +132,6 @@ extern "C" {
     }
     return NULL;
   }
-
   // threads
   vector<TCB*> threadList;
   TCB* currentThread;
@@ -140,7 +139,6 @@ extern "C" {
   pq readyThreads;
   vector<TCB*> sleepThreads;
   vector<Mutex*> mutexList;
-
 
   // BPB
   BPB BPBinfo;
@@ -171,8 +169,10 @@ extern "C" {
   uint8_t BPB_DATA[512];
   // root directory
   vector< SVMDirectoryEntry > rootDirs(512);
-
-
+// first entry cluster 
+ char  clusterEntry[512];
+ int fd;
+ uint16_t FAT[17*512];
 
 
   Mutex* getMutex(TVMMutexID mutexId){
@@ -345,7 +345,6 @@ extern "C" {
 
     // mount image
     // open FAT image
-    int fd;
     MachineFileOpen(mount,O_RDWR,0600,fileOpenCallback,currentThread);
     currentThread->state = VM_THREAD_STATE_WAITING;
     threadSchedule();
@@ -380,7 +379,7 @@ extern "C" {
     unsigned int readBytes = 17*512; // BPBinfo.clusterCount;
     int byteslimit = 512; 
     // read FAT
-    uint16_t FAT[17*512];//[BPBinfo.clusterCount];
+   // uint16_t FAT[17*512];
     int sizeRead = 0; 
     // cout << "filedescriptor" << fd << endl;
     while(readBytes>0){
@@ -421,7 +420,7 @@ extern "C" {
       readTotal += currentThread->result;
     }
     initializeDirectory(rootDirData);   
-
+    convertLname("VirtualMachine.cpp");
     mainEntry(argc,argv);
 
     MachineTerminate();
@@ -1101,7 +1100,7 @@ extern "C" {
     BPBinfo.firstDataSector = BPBinfo.firstRootSector + BPBinfo.rootDirectorySectors;
 
     BPBinfo.clusterCount = ( BPBinfo.totalSector32 - BPBinfo.firstDataSector)/ BPBinfo.sectorsPerCluster;
-
+   
 
 
   }
@@ -1111,23 +1110,51 @@ extern "C" {
    //str[ 12] = '\0';
   // cout << str << endl;
    // cout << *(char*)(rootDirData ) << endl;
-    for(int i = 0; i < 512; i++){
-      // if(i == 32 || i == 96 || i ==  160 || i == 224 ) 
-       cout << i << ": " << *(uint8_t *)(rootDirData + i ) << " " << endl;
-       // int k = 1;
-       // for(int j = 0; j < 5; j++ ){
-       //  rootDirs[i].DLongFileName[j] = *( (char*)rootDirData + i + k);
-       //  k += 2;
-       // }
+    for(int i = 0; i < 512; i+= 32){
+      
+       int k = 1;
+       if( *(uint8_t *)(rootDirData + i + 11 ) == 0xF  ){
+         for(int j = 0; j < 5;j++ ){
+          rootDirs[i].DLongFileName[j] = *(uint8_t *)(rootDirData + i + k );
+          cout << i + k<< ": " << *(uint8_t *)(rootDirData + i + k ) << " " << endl;
+          k += 2;
+         }
+         k = 14;
+         for(int j = 5; j < 12; j++ ){
+          rootDirs[i].DLongFileName[j] = *(uint8_t *)(rootDirData + i + k );
+          k += 2;
+         }
+
+         k = 28;
+         for(int j = 12; j < 14; j++ ){
+          // cout << i + k<< ": " << "j: " << j << " " << *(uint8_t *)(rootDirData + i + k ) << " " << endl;
+      
+          rootDirs[i].DLongFileName[j] = *(uint8_t *)(rootDirData + i + k );
+          // cout << "long in: " << rootDirs[i].DLongFileName[j] << endl; 
+          // cout << "i:" << i << " j: " << j << endl;
+          k += 2;
+         }
+
+         //rootDirs[i].DLongFileName[] = '\0';
+       }
+
        //if(!( i % 32) )
        cout << endl;
     }
+
+    for(int i = 0; i < 512; i++){
+      if ( strlen(rootDirs[i].DLongFileName) > 1 ){
+        string str(rootDirs[i].DLongFileName,14);
+        cout << "long : " << str << endl;
+
+      }
+    }
+    cout << "TEST: " << rootDirs[448].DLongFileName[12] << endl;
     cout << endl;
     for(int i = 0; i < rootDirs.size(); i += 32){
       memcpy(rootDirs[i].DShortFileName,rootDirData + i ,11);
       rootDirs[i].DShortFileName[12] = '\0';
       rootDirs[i].DAttributes = *(char*)(rootDirData + i + 11);
-     
       // Create 
       rootDirs[i].DCreate.DYear        = ( (*(uint16_t*)(rootDirData + i + 16) & 0xFE00) >> 9) + 1980 ;// bits 9-15
       rootDirs[i].DCreate.DMonth       = ( *(uint8_t*)(rootDirData + i + 16) & 0x1E0) >> 5; // bits 5-8
@@ -1149,38 +1176,91 @@ extern "C" {
       rootDirs[i].DModify.DSecond =  *(uint8_t*)(rootDirData + i + 22) & 0x1F;
       rootDirs[i].DModify.DHundredth =  *(uint8_t*)(rootDirData + i + 13);
 
-
+      //first cluster
+      clusterEntry[i] = *(uint16_t*)(rootDirData + i + 26);
       rootDirs[i].DSize = *(uint16_t*)(rootDirData + i + 28);	
     } 
     
-    cout << "DATE and TIME created " << endl;
-    for(int i = 0; i < rootDirs.size(); i++){
-     if( (strlen( rootDirs[i].DShortFileName) > 1) && (rootDirs[i].DCreate.DYear > 1980) && (rootDirs[i].DCreate.DYear < 2107) ){
-       // cout << rootDirs[i].DCreate.DYear << "/" << (int) rootDirs[i].DCreate.DMonth << "/" <<(int) rootDirs[i].DCreate.DDay << " " << (int)rootDirs[i].DCreate.DHour << ":" << (int)rootDirs[i].DCreate.DMinute;
-       // cout << "   " <<(uint16_t) rootDirs[i].DSize << " ";
-      //  cout << rootDirs[i].DShortFileName << endl;
-        cout <<  "long: " << rootDirs[i].DLongFileName << endl;
-      }
-    }
-    cout << endl;
-    // cout << "DATE and TIME modify " << endl;
-    // for(int i = 0; i < rootDirs.size(); i++){
-    //   if( strlen(rootDirs[i].DShortFileName) > 1  && (rootDirs[i].DCreate.DYear > 1980) && (rootDirs[i].DCreate.DYear < 2107)  ){
-    //     cout << rootDirs[i].DModify.DYear << "/" << (int) rootDirs[i].DModify.DMonth << "/" <<(int) rootDirs[i].DModify.DDay << " " << (int)rootDirs[i].DModify.DHour << ":" << (int)rootDirs[i].DModify.DMinute;
-    //     cout << "   " <<(uint16_t) rootDirs[i].DSize << " ";
-    //     cout << rootDirs[i].DShortFileName << endl;
-    //     //         cout << endl;
+     cout << "DATE and TIME created " << endl;
+     for(int i = 0; i < rootDirs.size(); i++){
+      if( (strlen( rootDirs[i].DShortFileName) > 1) && (rootDirs[i].DCreate.DYear > 1980) && (rootDirs[i].DCreate.DYear < 2107) ){
+         cout << rootDirs[i].DCreate.DYear << "/" << (int) rootDirs[i].DCreate.DMonth << "/" <<(int) rootDirs[i].DCreate.DDay << " " << (int)rootDirs[i].DCreate.DHour << ":" << (int)rootDirs[i].DCreate.DMinute;
+      cout << "   " <<(uint16_t) rootDirs[i].DSize << " ";
+    cout << rootDirs[i].DShortFileName << endl;
+       
+       }
+     }
+     cout << endl;
+     cout << "DATE and TIME modify " << endl;
+     for(int i = 0; i < rootDirs.size(); i++){
+     if( strlen(rootDirs[i].DShortFileName) > 1  && (rootDirs[i].DCreate.DYear > 1980) && (rootDirs[i].DCreate.DYear < 2107)  ){
+       cout << rootDirs[i].DModify.DYear << "/" << (int) rootDirs[i].DModify.DMonth << "/" <<(int) rootDirs[i].DModify.DDay << " " << (int)rootDirs[i].DModify.DHour << ":" << (int)rootDirs[i].DModify.DMinute;
+       cout << "   " <<(uint16_t) rootDirs[i].DSize << " ";
+      cout << rootDirs[i].DShortFileName << endl;
+      cout << "first cluster: " <<(uint16_t)clusterEntry[i] << endl;
+      cout << endl;
 
-    //   }
-    // }
-  //   cout << endl; 
-  //   cout << "DATA and TIME Access " << endl;
-  //   for(int i = 0; i < rootDirs.size(); i++ ){
-  //     if( strlen(rootDirs[i].DShortFileName)  && (rootDirs[i].DCreate.DYear > 1980) && (rootDirs[i].DCreate.DYear < 2107) ){
-  //       cout << rootDirs[i].DAccess.DYear << "/" << (int) rootDirs[i].DAccess.DMonth << "/" << (int)rootDirs[i].DAccess.DDay << endl;
-  //     }
-  //   }
-    
+     }
+   }
+  // //   cout << endl; 
+  // //   cout << "DATA and TIME Access " << endl;
+  // //   for(int i = 0; i < rootDirs.size(); i++ ){
+  // //     if( strlen(rootDirs[i].DShortFileName)  && (rootDirs[i].DCreate.DYear > 1980) && (rootDirs[i].DCreate.DYear < 2107) ){
+  // //       cout << rootDirs[i].DAccess.DYear << "/" << (int) rootDirs[i].DAccess.DMonth << "/" << (int)rootDirs[i].DAccess.DDay << endl;
+  // //     }
+  // //   }
+  // 29
+  // 3
+  int clusterwanted = 31;
+  MachineFileSeek(fd,BPBinfo.firstDataSector*512+ 512*(clusterwanted-2)*2 ,SEEK_SET,fileSeekCallback,currentThread);
+
+  threadSchedule();
+  int offset = currentThread->result;
+  cout <<"offset: " <<  offset << endl;
+  
+  void* memoryPool;
+  int8_t sector[512];
+  VMMemoryPoolAllocate((TVMMemoryPoolID)0,512,&memoryPool);
+  MachineFileRead(fd,memoryPool,512,fileReadCallback,currentThread);
+  currentThread->state = VM_THREAD_STATE_WAITING;
+  threadSchedule();  
+  memcpy(sector , memoryPool,512);
+  for(int i = 0; i < 512; i++){
+     cout << *( (char*)sector + i )  ;  
   }
+  cout << endl;
+  }
+void convertLname(char* lname ){
+ int size = strlen(lname);
+ char lnameUpper[size];
+ char shortName[11];
+ for( int i = 0; i < size; i++){
+   // if(toupper(lname[i]) != ' ')
+    lnameUpper[i] = toupper(lname[i]);
+ }
+ int i  = 0;
+ while( (lnameUpper[i] != '\0') && (lnameUpper[i] != '.') && ( i < 8)){
+    shortName[i] = lnameUpper[i];
+    i++;
+  }
+ 
+ // int lastChar = size - i;
+  if( lnameUpper[i] == '.' ){
+     shortName[8] = '.';
+     int ext = 0;
+     while( i < size && ext < 3 ){
+        shortName[i] = lnameUpper[i];
+        i++;
+        ext++;
+     } 
+  }
+    shortName[i] = '\0'; 
+    // cout << shortName << endl;
+ }
+
+void getChain(int clusterEntry){
+ // FAT
+}
+
 
 } 
