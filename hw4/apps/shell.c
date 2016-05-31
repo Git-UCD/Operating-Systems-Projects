@@ -115,10 +115,13 @@ void VMMain(int argc, char *argv[]){
                 Length = sizeof(LineBuffer);
 		VMPrint("Length: %d\n", Length);
                 while(VM_STATUS_SUCCESS == VMFileRead(FileDescriptor, LineBuffer, &Length)){
+                   // VMPrint("update length: %d\n ",Length);
                     if(Length){
                         VMFileWrite(1,LineBuffer,&Length);
                     }
                     if(Length < sizeof(LineBuffer)){
+                    VMPrint("update length: %d\n ",Length);
+
                         break;
                     }
                     Length = sizeof(LineBuffer);

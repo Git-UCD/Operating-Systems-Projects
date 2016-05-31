@@ -1072,20 +1072,24 @@ extern "C" {
     if(readFile == NULL){
       return VM_STATUS_FAILURE;
     }
-  //  *length = 512;
-    int readSize = 512;
+    int byteread = *length;
     int read = 0;
-    while( readSize > 0){
-     memcpy( data + read , readFile->dataSectors,512);
-     readSize -= 512;
-     read += 512;
-     *length -= 512;
+    int fileSize = readFile->filesize;
+    cout << "BEGINNING COPY: " << endl;
+    for(int i = 0; i < *length; i++){
+     memcpy( data + i , readFile->dataSectors+readFile->fileptr,1);
+     cout << *( (char*)(data + i));
+     readFile->fileptr++;
+     if(readFile->fileptr == readFile->filesize){
+	*length -= i;
+	break;
+	}
     }
     // currentThread->state = VM_THREAD_STATE_WAITING;
     // threadSchedule();
-    for(int i = 0; i < 1024*3; i++){
-      cout << *( (char*)readFile->dataSectors + i )  ;  
-     } 
+   // for(int i = 0; i < 1024*3; i++){
+     // cout << *( (char*)readFile->dataSectors + i )  ;  
+    // } 
    // *length = read;
    
     }
