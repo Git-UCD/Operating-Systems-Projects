@@ -22,9 +22,9 @@ extern "C" {
   void convertLname(char* lname);
   vector<int> getChain(int clusterEntry);
   void threadSchedule();
-  SVMDirectoryEntry getFileInfo(const char* fname);
+  SVMDirectoryEntry* getFileInfo(const char* fname);
 #define VM_THREAD_PRIORITY_IDLE                 ((TVMThreadPriority)0x00)
-  
+ volatile  int stop = 100;
   volatile int TIMER;
   static const int HIGH = 3;
   static const int MED = 2;
@@ -34,7 +34,7 @@ extern "C" {
   volatile int threadCount = 1;
   volatile int mutexCount = 1;
   volatile int poolCount = 1;
-  volatile int fdCount = 4;
+  volatile int fdCount = 3;
   TVMMainEntry VMLoadModule(const char *module);
   TVMStatus VMFilePrint(int filedescriptor, const char *format, ...);
  
@@ -153,10 +153,14 @@ extern "C" {
       uint8_t* dataSectors;
       char* filename;
       unsigned int filesize;
-     // vector<uint8_t> clusterLinks;
+      int sectors;
       SVMDirectoryEntry rootEntry;
+      uint8_t fileptr;
       void readSectorData(int firstCluster){
+         fileptr = 0;
+         sectors = 0;
          vector<int> clusterLinks = getChain(firstCluster);
+         sectors = clusterLinks.size()*2;
          int  cluster = firstCluster;
          dataSectors = (uint8_t *)malloc(clusterLinks.size()*1024);
          int read = 0;
@@ -273,6 +277,7 @@ extern "C" {
   }
 
   void idleThread(void*){
+   // cout << "idle" << endl;
     MachineResumeSignals(&sigstate);
     while(true);
     MachineResumeSignals(&sigstate);
@@ -977,13 +982,17 @@ extern "C" {
     File*  openFile = new File;
     openFile->fd = fdCount++;
     cout <<"giving fd: " <<  openFile->fd << endl;
-   // openFile->filename = filename;  
-    SVMDirectoryEntry rootfile = getFileInfo(filename);
-    openFile->filesize = rootfile.DSize;
-    cout << "opened: " <<  rootfile.DShortFileName << endl;
-    openFile->readSectorData(rootfile.clusterEntry); 
+    // openFile->filename = filename;  
+    SVMDirectoryEntry* rootfile = getFileInfo(filename);
+    if( rootfile == NULL){
+     cout << "failed" << endl;
+      return VM_STATUS_FAILURE;
+    }
+    openFile->filesize = rootfile->DSize;
+    cout << "opened: " <<  rootfile->DShortFileName << endl;
+    openFile->readSectorData(rootfile->clusterEntry); 
     fatFiles.push_back(openFile);
-   // currentThread->state = VM_THREAD_STATE_WAITING;
+    // currentThread->state = VM_THREAD_STATE_WAITING;
     *filedescriptor = openFile->fd;
     MachineResumeSignals(&sigstate);
     cout << "done: " << endl;
@@ -997,12 +1006,14 @@ extern "C" {
       threadSchedule();
   }
   TVMStatus VMFileClose(int filedescriptor){
-    MachineSuspendSignals(&sigstate);
-    TMachineFileCallback fCloseCallback = fileCloseCallback;
-    MachineFileClose(filedescriptor, fCloseCallback, currentThread); 
-    currentThread->state = VM_THREAD_STATE_WAITING;
-    threadSchedule();
-    MachineResumeSignals(&sigstate);
+   // MachineSuspendSignals(&sigstate);
+    //TMachineFileCallback fCloseCallback = fileCloseCallback;
+   // MachineFileClose(filedescriptor, fCloseCallback, currentThread); 
+   // currentThread->state = VM_THREAD_STATE_WAITING;
+   // threadSchedule();
+    
+   // MachineResumeSignals(&sigstate);
+    cout << "file close" << endl;
     return VM_STATUS_SUCCESS;
   }  
 
@@ -1032,11 +1043,11 @@ extern "C" {
 
 
   TVMStatus VMFileRead(int filedescriptor, void *data, int *length){
-   MachineSuspendSignals(&sigstate);
+  // MachineSuspendSignals(&sigstate);
     cout << "fd: " << filedescriptor << endl;
     cout << "length: " << *length << endl;
-    if(filedescriptor < 4){
-     // MachineSuspendSignals(&sigstate);
+    if(filedescriptor < 3){
+      MachineSuspendSignals(&sigstate);
       int totalBytes = *length, bytes;
       void* newMemoryPool;
       VMMemoryPoolAllocate((TVMMemoryPoolID)0, 512, &newMemoryPool);
@@ -1051,25 +1062,37 @@ extern "C" {
         data+= bytes; 
       }
       VMMemoryPoolDeallocate((TVMMemoryPoolID)0, &newMemoryPool);
-    //  MachineResumeSignals(&sigstate);
+      MachineResumeSignals(&sigstate);
 
    }
    else{ 
     cout << "reading fd: " << filedescriptor << endl;
     cout << "len: " << *length << endl;
     File* readFile = getFile(filedescriptor);
-    int readSize = *length;
-   // while( readSize > 0 ){
-     memcpy( data, readFile->dataSectors,512);
-  //   currentThread->state = VM_THREAD_STATE_WAITING;
-//     threadSchedule();
-    *length -= 512;
+    if(readFile == NULL){
+      return VM_STATUS_FAILURE;
     }
-    //MachineResumeSignals(&sigstate);
+  //  *length = 512;
+    int readSize = 512;
+    int read = 0;
+    while( readSize > 0){
+     memcpy( data + read , readFile->dataSectors,512);
+     readSize -= 512;
+     read += 512;
+     *length -= 512;
+    }
+    // currentThread->state = VM_THREAD_STATE_WAITING;
+    // threadSchedule();
+    for(int i = 0; i < 1024*3; i++){
+      cout << *( (char*)readFile->dataSectors + i )  ;  
+     } 
+   // *length = read;
+   
+    }
+   // MachineResumeSignals(&sigstate);
     cout << "read done" << endl;
     return VM_STATUS_SUCCESS;
   }
-
 
   TVMStatus VMDirectoryOpen(const char *dirname, int *dirdescriptor){
     if(dirname == NULL || dirdescriptor == NULL){
@@ -1389,13 +1412,14 @@ vector<int> getChain(int clusterEntry ){
   return clusterSet;
 }
 
-SVMDirectoryEntry getFileInfo(const char* fname){
+SVMDirectoryEntry* getFileInfo(const char* fname){
 // use abs path instead 
   for(unsigned int i = 0; i < rootDirs.size(); i++){
     if(!strncmp(rootDirs[i].DShortFileName,fname,strlen(fname)) ){
-      return(rootDirs[i]);
+      return(&rootDirs[i]);
     }
  }
+  return NULL;
 } 
 
 File* getFile(int fileD ){

@@ -113,6 +113,7 @@ void VMMain(int argc, char *argv[]){
             }
             if(VM_STATUS_SUCCESS == VMFileOpen(LineBuffer + CharactersIn, O_RDONLY, 0644, &FileDescriptor)){
                 Length = sizeof(LineBuffer);
+		VMPrint("Length: %d\n", Length);
                 while(VM_STATUS_SUCCESS == VMFileRead(FileDescriptor, LineBuffer, &Length)){
                     if(Length){
                         VMFileWrite(1,LineBuffer,&Length);
