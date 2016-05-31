@@ -20,8 +20,9 @@ extern "C" {
   void initializeBPB();
   void initializeDirectory(uint8_t rootDirData[]);   
   void convertLname(char* lname);
-vector<int> getChain(int clusterEntry);
-
+  vector<int> getChain(int clusterEntry);
+  void threadSchedule();
+  SVMDirectoryEntry getFileInfo(const char* fname);
 #define VM_THREAD_PRIORITY_IDLE                 ((TVMThreadPriority)0x00)
   
   volatile int TIMER;
@@ -33,9 +34,10 @@ vector<int> getChain(int clusterEntry);
   volatile int threadCount = 1;
   volatile int mutexCount = 1;
   volatile int poolCount = 1;
+  volatile int fdCount = 4;
   TVMMainEntry VMLoadModule(const char *module);
   TVMStatus VMFilePrint(int filedescriptor, const char *format, ...);
-
+ 
   class BPB{
     public:
       string   OEM;
@@ -78,7 +80,8 @@ vector<int> getChain(int clusterEntry);
       SMachineContext context;
       int result;
   };
-
+  
+     
   struct LessThanByPriority{
     bool operator()(const TCB* lhs, const TCB* rhs) const{
       return lhs->priority < rhs->priority;
@@ -86,6 +89,12 @@ vector<int> getChain(int clusterEntry);
   };
 
   typedef priority_queue<TCB*, vector<TCB*>, LessThanByPriority> pq;
+ // threads
+  vector<TCB*> threadList;
+  TCB* currentThread;
+  pq readyThreads;
+  vector<TCB*> sleepThreads;
+
 
   class Mutex{
     public:
@@ -100,7 +109,8 @@ vector<int> getChain(int clusterEntry);
       }
 
   };
-
+  // mutexs
+  vector<Mutex*> mutexList;
   const TVMMemoryPoolID VM_MEMORY_POOL_ID_SYSTEM = 1;
   void* dataPtr; //will be used to shared memory read/write allocation
 
@@ -122,6 +132,61 @@ vector<int> getChain(int clusterEntry);
       vector<MemoryChunk> PTRS_TO_FREE_BLOCKS;
       vector<MemoryChunk> PTRS_TO_USED_BLOCKS;
   };
+ // FAT image 
+   uint8_t BPB_DATA[512];
+ // root directory
+   vector< SVMDirectoryEntry > rootDirs(512);
+ // first entry cluster 
+  // char  clusterEntry[512];
+   int FAT_FD;
+   uint16_t FAT[17*512];
+   BPB BPBinfo;
+ 
+ 
+
+  class File{
+   public:
+      int fd;
+      int id;
+      int flag;
+      int mode;
+      uint8_t* dataSectors;
+      char* filename;
+      unsigned int filesize;
+     // vector<uint8_t> clusterLinks;
+      SVMDirectoryEntry rootEntry;
+      void readSectorData(int firstCluster){
+         vector<int> clusterLinks = getChain(firstCluster);
+         int  cluster = firstCluster;
+         dataSectors = (uint8_t *)malloc(clusterLinks.size()*1024);
+         int read = 0;
+         for(unsigned int i = 0; i < clusterLinks.size(); i++){
+           MachineFileSeek(FAT_FD,BPBinfo.firstDataSector*512 + 512*(clusterLinks[i] -2)*2,SEEK_SET, fileSeekCallback,currentThread);
+           currentThread->state = VM_THREAD_STATE_WAITING;
+           threadSchedule();
+           void* memoryPool;
+           VMMemoryPoolAllocate((TVMMemoryPoolID)0,512,&memoryPool);
+           int size = 1024;
+           while(size > 0){
+             MachineFileRead(FAT_FD,memoryPool,512,fileReadCallback,currentThread);
+             currentThread->state = VM_THREAD_STATE_WAITING;
+             threadSchedule();
+             memcpy(dataSectors + read,memoryPool,512);
+             read += 512;
+             size -= 512;
+          }
+           VMMemoryPoolDeallocate((TVMMemoryPoolID)0,&memoryPool);
+       }
+           
+     }
+
+  };
+  
+ //files
+ vector<File*> fatFiles;
+ File* getFile(int fd);
+
+
 
   vector<MemPool*> memPools;
   MemPool* findMemoryPool(TVMMemoryPoolID idSought){
@@ -133,16 +198,8 @@ vector<int> getChain(int clusterEntry);
     }
     return NULL;
   }
-  // threads
-  vector<TCB*> threadList;
-  TCB* currentThread;
+ 
 
-  pq readyThreads;
-  vector<TCB*> sleepThreads;
-  vector<Mutex*> mutexList;
-
-  // BPB
-  BPB BPBinfo;
   void printBPBinfo(){
     MachineSuspendSignals(&sigstate);
     cout << "OEM Name           : " << BPBinfo.OEM << flush << endl;
@@ -167,14 +224,6 @@ vector<int> getChain(int clusterEntry);
     cout << "Cluster Count      : " << BPBinfo.clusterCount << flush << endl;
     MachineResumeSignals(&sigstate);
   }
-  uint8_t BPB_DATA[512];
-  // root directory
-  vector< SVMDirectoryEntry > rootDirs(512);
-// first entry cluster 
- char  clusterEntry[512];
- int fd;
- uint16_t FAT[17*512];
-
 
   Mutex* getMutex(TVMMutexID mutexId){
     for(unsigned int i = 0; i < mutexList.size(); i++ ){
@@ -192,10 +241,6 @@ vector<int> getChain(int clusterEntry);
     }
     return NULL;
   }
-
-  //  void getBPBinfo(unsigned int offset, unsigned int size, uint8_t* dataReturn ){
-  //   memcpy(dataReturn,BPBStructure+offset,size);
-  // }
 
 
   void threadSchedule(){
@@ -228,7 +273,6 @@ vector<int> getChain(int clusterEntry);
   }
 
   void idleThread(void*){
-    // cout << "idle" << endl;
     MachineResumeSignals(&sigstate);
     while(true);
     MachineResumeSignals(&sigstate);
@@ -349,13 +393,13 @@ vector<int> getChain(int clusterEntry);
     MachineFileOpen(mount,O_RDWR,0600,fileOpenCallback,currentThread);
     currentThread->state = VM_THREAD_STATE_WAITING;
     threadSchedule();
-    fd = currentThread->result;
+    FAT_FD = currentThread->result;
 
     // read BPB from image
     int len = 0;
     void* memoryPoolBPB;
     VMMemoryPoolAllocate((TVMMemoryPoolID)0,512,&memoryPoolBPB);
-    MachineFileRead(fd,memoryPoolBPB,512,fileReadCallback,currentThread);
+    MachineFileRead(FAT_FD,memoryPoolBPB,512,fileReadCallback,currentThread);
     currentThread->state = VM_THREAD_STATE_WAITING;
     threadSchedule();
     len = currentThread->result;
@@ -369,7 +413,7 @@ vector<int> getChain(int clusterEntry);
     //printBPBinfo();
 
     // seek to where FAT is 
-    MachineFileSeek(fd,512,SEEK_SET,fileSeekCallback,currentThread);
+    MachineFileSeek(FAT_FD,512,SEEK_SET,fileSeekCallback,currentThread);
     threadSchedule();
     int newoffset = currentThread->result;
     //cout << "newoffset: " << newoffset << endl;
@@ -384,7 +428,7 @@ vector<int> getChain(int clusterEntry);
     int sizeRead = 0; 
     // cout << "filedescriptor" << fd << endl;
     while(readBytes>0){
-      MachineFileRead(fd,memoryPoolFAT,byteslimit,fileReadCallback,currentThread);
+      MachineFileRead(FAT_FD,memoryPoolFAT,byteslimit,fileReadCallback,currentThread);
       currentThread->state = VM_THREAD_STATE_WAITING;
       threadSchedule();
       memcpy(FAT+sizeRead,memoryPoolFAT,byteslimit);
@@ -400,7 +444,7 @@ vector<int> getChain(int clusterEntry);
     */
     cout <<endl;
     // seek to root directory
-    MachineFileSeek(fd,BPBinfo.firstRootSector*512,0,fileSeekCallback,currentThread);
+    MachineFileSeek(FAT_FD,BPBinfo.firstRootSector*512,0,fileSeekCallback,currentThread);
     threadSchedule();
     int rootoffset = currentThread->result;
     //cout << "rootoffset: " << rootoffset << endl;
@@ -413,13 +457,15 @@ vector<int> getChain(int clusterEntry);
     int readTotal = 0;
     byteslimit = 512;
     while(totalBytes>0){
-      MachineFileRead(fd,memoryPoolRoot,byteslimit,fileReadCallback,currentThread);
+      MachineFileRead(FAT_FD,memoryPoolRoot,byteslimit,fileReadCallback,currentThread);
       currentThread->state = VM_THREAD_STATE_WAITING;
       threadSchedule();
       memcpy(rootDirData + readTotal,memoryPoolRoot,byteslimit);
       totalBytes = totalBytes - byteslimit;
       readTotal += currentThread->result;
     }
+    VMMemoryPoolDeallocate((TVMMemoryPoolID)0,&memoryPoolRoot);
+
     initializeDirectory(rootDirData);   
     convertLname("VirtualMachine.cpp");
     mainEntry(argc,argv);
@@ -927,12 +973,20 @@ vector<int> getChain(int clusterEntry);
 
   TVMStatus VMFileOpen(const char *filename, int flags, int mode, int *filedescriptor){
     MachineSuspendSignals(&sigstate);
-    TMachineFileCallback fOpenCallback = fileOpenCallback;
-    MachineFileOpen(filename, flags,  mode, fOpenCallback, currentThread);
-    currentThread->state = VM_THREAD_STATE_WAITING;
-    threadSchedule();
-    *filedescriptor = currentThread->result; 
+    cout << "opening: " << filename << endl;
+    File*  openFile = new File;
+    openFile->fd = fdCount++;
+    cout <<"giving fd: " <<  openFile->fd << endl;
+   // openFile->filename = filename;  
+    SVMDirectoryEntry rootfile = getFileInfo(filename);
+    openFile->filesize = rootfile.DSize;
+    cout << "opened: " <<  rootfile.DShortFileName << endl;
+    openFile->readSectorData(rootfile.clusterEntry); 
+    fatFiles.push_back(openFile);
+   // currentThread->state = VM_THREAD_STATE_WAITING;
+    *filedescriptor = openFile->fd;
     MachineResumeSignals(&sigstate);
+    cout << "done: " << endl;
     return VM_STATUS_SUCCESS;
   }
 
@@ -945,7 +999,7 @@ vector<int> getChain(int clusterEntry);
   TVMStatus VMFileClose(int filedescriptor){
     MachineSuspendSignals(&sigstate);
     TMachineFileCallback fCloseCallback = fileCloseCallback;
-    MachineFileClose(filedescriptor, fCloseCallback, currentThread);
+    MachineFileClose(filedescriptor, fCloseCallback, currentThread); 
     currentThread->state = VM_THREAD_STATE_WAITING;
     threadSchedule();
     MachineResumeSignals(&sigstate);
@@ -978,28 +1032,41 @@ vector<int> getChain(int clusterEntry);
 
 
   TVMStatus VMFileRead(int filedescriptor, void *data, int *length){
-    MachineSuspendSignals(&sigstate);
-    TMachineFileCallback fReadCallback = fileReadCallback;
-    int totalBytes = *length, bytes;
-    void* newMemoryPool;
-    VMMemoryPoolAllocate((TVMMemoryPoolID)0, 512, &newMemoryPool);
-    while(totalBytes>0){  
-      (totalBytes >= 512) ? bytes = 512 : bytes = totalBytes;
-      MachineFileRead(filedescriptor, newMemoryPool, bytes, fReadCallback, currentThread);
-      currentThread->state = VM_THREAD_STATE_WAITING;
-      threadSchedule();
-      memcpy(data, newMemoryPool, bytes);
-      totalBytes = totalBytes - bytes;
-      *length = currentThread->result;
-      data+= bytes; 
+   MachineSuspendSignals(&sigstate);
+    cout << "fd: " << filedescriptor << endl;
+    cout << "length: " << *length << endl;
+    if(filedescriptor < 4){
+     // MachineSuspendSignals(&sigstate);
+      int totalBytes = *length, bytes;
+      void* newMemoryPool;
+      VMMemoryPoolAllocate((TVMMemoryPoolID)0, 512, &newMemoryPool);
+      while(totalBytes>0){  
+        (totalBytes >= 512) ? bytes = 512 : bytes = totalBytes;
+        MachineFileRead(filedescriptor, newMemoryPool, bytes, fileReadCallback, currentThread);
+        currentThread->state = VM_THREAD_STATE_WAITING;
+        threadSchedule();
+        memcpy(data, newMemoryPool, bytes);
+        totalBytes = totalBytes - bytes;
+        *length = currentThread->result;
+        data+= bytes; 
+      }
+      VMMemoryPoolDeallocate((TVMMemoryPoolID)0, &newMemoryPool);
+    //  MachineResumeSignals(&sigstate);
+
+   }
+   else{ 
+    cout << "reading fd: " << filedescriptor << endl;
+    cout << "len: " << *length << endl;
+    File* readFile = getFile(filedescriptor);
+    int readSize = *length;
+   // while( readSize > 0 ){
+     memcpy( data, readFile->dataSectors,512);
+  //   currentThread->state = VM_THREAD_STATE_WAITING;
+//     threadSchedule();
+    *length -= 512;
     }
-    VMMemoryPoolDeallocate((TVMMemoryPoolID)0, &newMemoryPool);
-    //MachineFileRead(filedescriptor, dataPtr , *length, fReadCallback, currentThread);
-    //currentThread->state = VM_THREAD_STATE_WAITING;
-    //threadSchedule();
-    //*length = currentThread->result;
-    //memcpy(data,dataPtr,*length);
-    MachineResumeSignals(&sigstate);
+    //MachineResumeSignals(&sigstate);
+    cout << "read done" << endl;
     return VM_STATUS_SUCCESS;
   }
 
@@ -1106,6 +1173,7 @@ vector<int> getChain(int clusterEntry);
 
   }
   void initializeDirectory(uint8_t rootDirData[]){
+   /*
     for(int i = 0; i < 512; i+= 32){
        int k = 1;
        if( *(uint8_t *)(rootDirData + i + 11 ) == 0xF  ){
@@ -1142,42 +1210,84 @@ vector<int> getChain(int clusterEntry);
     }
     cout << "TEST: " << rootDirs[448].DLongFileName[12] << endl;
     cout << endl;
-    for(int i = 0; i < rootDirs.size(); i += 32){
-      memcpy(rootDirs[i].DShortFileName,rootDirData + i ,11);
-      rootDirs[i].DShortFileName[12] = '\0';
-      rootDirs[i].DAttributes = *(char*)(rootDirData + i + 11);
+    */
+
+    /*
+    for(int i = 512; i < 512*2; i++){
+     cout << "i: " << i << " " << *((char*)rootDirData + i) << endl;
+    }
+   */
+    int index = 0;
+    for(int i = 0; i < rootDirs.size()*32; i += 32){
+     // index =  i;
+    // fixing the short name file extension  
+      char temp[12];
+      memcpy(temp,rootDirData + i ,11);
+      temp[12] = '\0';
+      int k = 0;
+    // copy only the file name
+      for(k; k < 11; k++){
+        if(temp[k] == 0x20)
+          break;
+        rootDirs[index].DShortFileName[k] = temp[k];
+      }
+      int endDot = k; // if there is an file extension the we place a dot at this position
+      k++;
+      int j = k;
+      bool extension = false;
+     
+    // copy the extension part
+      while( temp[k] != '\0' ){
+        if(isalpha( temp[k] ) ){
+            rootDirs[index].DShortFileName[j] = temp[k];
+            j++;
+            extension = true;
+          }
+          k++;
+      }
+      
+      if(extension){
+        rootDirs[index].DShortFileName[endDot] = '.';
+      }
+      rootDirs[index].DShortFileName[12] = '\0';
+   
+   
+     
+        
+      rootDirs[index].DAttributes = *(char*)(rootDirData + i + 11);
       // Create 
-      rootDirs[i].DCreate.DYear        = ( (*(uint16_t*)(rootDirData + i + 16) & 0xFE00) >> 9) + 1980 ;// bits 9-15
-      rootDirs[i].DCreate.DMonth       = ( *(uint8_t*)(rootDirData + i + 16) & 0x1E0) >> 5; // bits 5-8
-      rootDirs[i].DCreate.DDay         = *(uint16_t*)(rootDirData + i + 16) & 0x1F;          // bits 0-4
-      rootDirs[i].DCreate.DHour        = ( *(uint16_t*)(rootDirData + i + 14) & 0xF800)>>11;  // bits 11-15
-      rootDirs[i].DCreate.DMinute      = ( *(uint16_t*)(rootDirData + i + 14) & 0x7E0)>>5;  // bits 5-10
-      rootDirs[i].DCreate.DSecond      =  *(uint16_t*)(rootDirData + i + 14) & 0x1F;         // bits 0-4
-      rootDirs[i].DCreate.DHundredth  =  *(uint8_t*)(rootDirData + i + 13);
+      rootDirs[index].DCreate.DYear        = ( (*(uint16_t*)(rootDirData + i + 16) & 0xFE00) >> 9) + 1980 ;// bits 9-15
+      rootDirs[index].DCreate.DMonth       = ( *(uint8_t*)(rootDirData + i + 16) & 0x1E0) >> 5; // bits 5-8
+      rootDirs[index].DCreate.DDay         = *(uint16_t*)(rootDirData + i + 16) & 0x1F;          // bits 0-4
+      rootDirs[index].DCreate.DHour        = ( *(uint16_t*)(rootDirData + i + 14) & 0xF800)>>11;  // bits 11-15
+      rootDirs[index].DCreate.DMinute      = ( *(uint16_t*)(rootDirData + i + 14) & 0x7E0)>>5;  // bits 5-10
+      rootDirs[index].DCreate.DSecond      =  *(uint16_t*)(rootDirData + i + 14) & 0x1F;         // bits 0-4
+      rootDirs[index].DCreate.DHundredth  =  *(uint8_t*)(rootDirData + i + 13);
       // Access
-      rootDirs[i].DAccess.DYear        =( ( *(uint16_t*)(rootDirData + i + 18)& 0xFE00) >> 9) + 1980 ;// bits 9-15
-      rootDirs[i].DAccess.DMonth       = ( *(uint16_t*)(rootDirData + i + 18) & 0x1E0) >> 5; // bits 5-8
-      rootDirs[i].DAccess.DDay         = *(uint16_t*)(rootDirData + i + 18) & 0x1F;          // bits 0-4
+      rootDirs[index].DAccess.DYear        =( ( *(uint16_t*)(rootDirData + i + 18)& 0xFE00) >> 9) + 1980 ;// bits 9-15
+      rootDirs[index].DAccess.DMonth       = ( *(uint16_t*)(rootDirData + i + 18) & 0x1E0) >> 5; // bits 5-8
+      rootDirs[index].DAccess.DDay         = *(uint16_t*)(rootDirData + i + 18) & 0x1F;          // bits 0-4
       //modify 
-      rootDirs[i].DModify.DYear   =  (*(uint8_t*)(rootDirData + i + 24) & 0xFE00) >> 9;
-      rootDirs[i].DModify.DMonth  =  (*(uint8_t*)(rootDirData + i + 24) & 0x1E0) >> 5;
-      rootDirs[i].DModify.DDay    =  *(uint8_t*)(rootDirData + i + 24) & 0x1F;
-      rootDirs[i].DModify.DHour   =  (*(uint8_t*)(rootDirData + i + 22) & 0xF800) >> 11;
-      rootDirs[i].DModify.DMinute =  (*(uint8_t*)(rootDirData + i + 22) & 0x7E0) >> 5;
-      rootDirs[i].DModify.DSecond =  *(uint8_t*)(rootDirData + i + 22) & 0x1F;
-      rootDirs[i].DModify.DHundredth =  *(uint8_t*)(rootDirData + i + 13);
+      rootDirs[index].DModify.DYear   =  (*(uint8_t*)(rootDirData + i + 24) & 0xFE00) >> 9;
+      rootDirs[index].DModify.DMonth  =  (*(uint8_t*)(rootDirData + i + 24) & 0x1E0) >> 5;
+      rootDirs[index].DModify.DDay    =  *(uint8_t*)(rootDirData + i + 24) & 0x1F;
+      rootDirs[index].DModify.DHour   =  (*(uint8_t*)(rootDirData + i + 22) & 0xF800) >> 11;
+      rootDirs[index].DModify.DMinute =  (*(uint8_t*)(rootDirData + i + 22) & 0x7E0) >> 5;
+      rootDirs[index].DModify.DSecond =  *(uint8_t*)(rootDirData + i + 22) & 0x1F;
+      rootDirs[index].DModify.DHundredth =  *(uint8_t*)(rootDirData + i + 13);
 
       //first cluster
-      clusterEntry[i] = *(uint16_t*)(rootDirData + i + 26);
-      rootDirs[i].DSize = *(uint16_t*)(rootDirData + i + 28);	
+      rootDirs[index].clusterEntry = *(uint16_t*)(rootDirData + i + 26);
+      rootDirs[index].DSize = *(uint16_t*)(rootDirData + i + 28);
+      index++;	
     } 
-    
+   
      cout << "DATE and TIME created " << endl;
      for(int i = 0; i < rootDirs.size(); i++){
       if( (strlen( rootDirs[i].DShortFileName) > 1) && (rootDirs[i].DCreate.DYear > 1980) && (rootDirs[i].DCreate.DYear < 2107) ){
          cout << rootDirs[i].DCreate.DYear << "/" << (int) rootDirs[i].DCreate.DMonth << "/" <<(int) rootDirs[i].DCreate.DDay << " " << (int)rootDirs[i].DCreate.DHour << ":" << (int)rootDirs[i].DCreate.DMinute;
-      cout << "   " <<(uint16_t) rootDirs[i].DSize << " ";
-    cout << rootDirs[i].DShortFileName << endl;
+         cout << "   " <<(uint16_t) rootDirs[i].DSize << " ";
+         cout << rootDirs[i].DShortFileName << endl;
        
        }
      }
@@ -1188,11 +1298,12 @@ vector<int> getChain(int clusterEntry);
        cout << rootDirs[i].DModify.DYear << "/" << (int) rootDirs[i].DModify.DMonth << "/" <<(int) rootDirs[i].DModify.DDay << " " << (int)rootDirs[i].DModify.DHour << ":" << (int)rootDirs[i].DModify.DMinute;
        cout << "   " <<(uint16_t) rootDirs[i].DSize << " ";
       cout << rootDirs[i].DShortFileName << endl;
-      cout << "first cluster: " <<(uint16_t)clusterEntry[i] << endl;
+      cout << "first cluster: " <<(uint16_t)rootDirs[i].clusterEntry << endl;
       cout << endl;
 
      }
    }
+ 
   // //   cout << endl; 
   // //   cout << "DATA and TIME Access " << endl;
   // //   for(int i = 0; i < rootDirs.size(); i++ ){
@@ -1202,27 +1313,42 @@ vector<int> getChain(int clusterEntry);
   // //   }
   // 29
   // 3
+  /*
   int clusterwanted = 31;
-  MachineFileSeek(fd,BPBinfo.firstDataSector*512+ 512*(clusterwanted-2)*2 ,SEEK_SET,fileSeekCallback,currentThread);
+  MachineFileSeek(FAT_FD,BPBinfo.firstDataSector*512+ 512*(clusterwanted-2)*2 ,SEEK_SET,fileSeekCallback,currentThread);
   threadSchedule();
-  int offset = currentThread->result;
-  cout <<"offset: " <<  offset << endl;
   
+
   void* memoryPool;
-  int8_t sector[512];
+  vector<int>link = getChain(31);
+  uint8_t sector[link.size()*1024];
   VMMemoryPoolAllocate((TVMMemoryPoolID)0,512,&memoryPool);
-  MachineFileRead(fd,memoryPool,512,fileReadCallback,currentThread);
-  currentThread->state = VM_THREAD_STATE_WAITING;
-  threadSchedule();  
-  memcpy(sector , memoryPool,512);
-  for(int i = 0; i < 512; i++){
+  int read = 0;
+  for(unsigned int i = 0; i < link.size(); i++){
+    MachineFileSeek(FAT_FD,BPBinfo.firstDataSector*512+ 512*(link[i]-2)*2 ,SEEK_SET,fileSeekCallback,currentThread);
+    threadSchedule();
+    int size = 1024;
+    while( size > 0 ){
+      MachineFileRead(FAT_FD,memoryPool,512,fileReadCallback,currentThread);
+      currentThread->state = VM_THREAD_STATE_WAITING;
+      threadSchedule();  
+      memcpy(sector + read , memoryPool,512);
+      size = size - 512;
+      read += currentThread->result;
+    }
+  }
+  VMMemoryPoolDeallocate((TVMMemoryPoolID)0,&memoryPool);
+*/
+/*
+  for(int i = 0; i < 1024*link.size(); i++){
      cout << *( (char*)sector + i )  ;  
   }
   cout << endl;
-  vector<int> chain =  getChain(29);
+  vector<int> chain =  getChain(31);
   for(int i = 0; i < chain.size(); i++){
-    cout << i << ":" << chain[i] << endl;
+    cout << i << ":" <<hex <<  chain[i] << dec <<  endl;
   }
+  */
   }
 void convertLname(char* lname ){
  int size = strlen(lname);
@@ -1253,16 +1379,29 @@ void convertLname(char* lname ){
  }
 
 vector<int> getChain(int clusterEntry ){
- vector<int>clusterSet;
- clusterSet.push_back(clusterEntry);
- int iter  = clusterEntry;
- while(FAT[iter] <  0xFFF8 ){
-   clusterSet.push_back(FAT[iter]);
-   iter = FAT[iter];
+  vector<int>clusterSet;
+  clusterSet.push_back(clusterEntry);
+  int iter  = clusterEntry;
+  while(FAT[iter] <  0xFFF8 ){
+    clusterSet.push_back(FAT[iter]);
+    iter = FAT[iter];
  }
-return clusterSet;
- 
+  return clusterSet;
 }
 
+SVMDirectoryEntry getFileInfo(const char* fname){
+// use abs path instead 
+  for(unsigned int i = 0; i < rootDirs.size(); i++){
+    if(!strncmp(rootDirs[i].DShortFileName,fname,strlen(fname)) ){
+      return(rootDirs[i]);
+    }
+ }
+} 
 
+File* getFile(int fileD ){
+  for(unsigned int i = 0; i < fatFiles.size(); i++){
+    if( fatFiles[i]->fd == fileD )
+     return fatFiles[i];
+  }
+}
 } 

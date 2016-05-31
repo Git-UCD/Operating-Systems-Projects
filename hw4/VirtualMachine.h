@@ -64,6 +64,7 @@ typedef struct{
     char DShortFileName[VM_FILE_SYSTEM_SFN_SIZE];
     unsigned int DSize;
     unsigned char DAttributes;
+    unsigned int  clusterEntry;
     SVMDateTime DCreate;
     SVMDateTime DAccess;
     SVMDateTime DModify;
